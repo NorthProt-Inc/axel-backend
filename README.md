@@ -51,7 +51,7 @@
 
 ## Core Components
 
-### 1. Chat Pipeline (`backend/core/chat_handler.py`)
+~~### 1. Chat Pipeline (`backend/core/chat_handler.py`)
 
 **"Think -> Tool -> Speak"** 패턴의 단순화된 파이프라인.
 
@@ -67,7 +67,7 @@ TIER_CONFIG = {
     "mini": {"working_turns": 50,  "max_context_chars": 500_000},
     "mid":  {"working_turns": 100, "max_context_chars": 1_000_000},
     "pro":  {"working_turns": 200, "max_context_chars": 2_000_000},
-}
+}~~
 ```
 
 ### 2. Memory System (`backend/memory/`)
@@ -78,7 +78,7 @@ TIER_CONFIG = {
 |-------|---------|---------|--------------|
 | **Working Memory** | JSON | 현재 대화 컨텍스트 | 150,000 tokens |
 | **Session Archive** | SQLite | 세션 요약 및 메타데이터 | Permanent |
-| **Long-term Memory** | ChromaDB | 벡터 검색 기반 장기 기억 | 120,000 tokens |
+| **Long-term Memory** | ChromaDB | 벡터 검색 기반 장기 기억 | 120,000 tokens | 
 
 **Key Modules:**
 - `permanent.py` - ChromaDB 통합 장기 메모리

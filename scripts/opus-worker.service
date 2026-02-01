@@ -1,0 +1,30 @@
+[Unit]
+Description=Opus Bridge MCP Server (Project Ouroboros Worker)
+After=network.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=northprot
+WorkingDirectory=/home/northprot/projects/axnmihn
+Environment=PYTHONPATH=/home/northprot/projects/axnmihn
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/northprot/.local/bin:/home/northprot/.nvm/versions/node/v22.0.0/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/northprot/projects-env/bin/python -m backend.protocols.mcp.opus_bridge sse --host 0.0.0.0 --port 8767
+Restart=always
+RestartSec=5
+
+# Graceful shutdown
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=opus-worker
+
+[Install]
+WantedBy=multi-user.target

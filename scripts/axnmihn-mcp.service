@@ -1,0 +1,29 @@
+[Unit]
+Description=Axnmihn MCP Server (SSE Transport)
+After=network.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=northprot
+WorkingDirectory=/home/northprot/projects/axnmihn
+Environment=PYTHONPATH=/home/northprot/projects/axnmihn
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/northprot/projects-env/bin/python -m backend.core.mcp_server --host 0.0.0.0 --port 8555
+Restart=always
+RestartSec=5
+
+# Graceful shutdown
+TimeoutStopSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=axnmihn-mcp
+
+[Install]
+WantedBy=multi-user.target

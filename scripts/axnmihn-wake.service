@@ -1,0 +1,24 @@
+[Unit]
+Description=Axnmihn Wakeword Service
+After=network.target sound.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=northprot
+WorkingDirectory=/home/northprot/projects/axnmihn
+Environment=PYTHONPATH=/home/northprot/projects/axnmihn
+Environment=PYTHONUNBUFFERED=1
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/home/northprot/projects-env/bin/python -m backend.wake.run_wake
+Restart=always
+RestartSec=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=axnmihn-wake
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,28 @@
+[Unit]
+Description=Axnmihn Research MCP Server (Deep Research Agent)
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=northprot
+WorkingDirectory=/home/northprot/projects/axnmihn
+Environment=PYTHONPATH=/home/northprot/projects/axnmihn
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/northprot/projects-env/bin/python -m backend.protocols.mcp.research_server sse 8766
+Restart=always
+RestartSec=5
+
+# Graceful shutdown
+TimeoutStopSec=15
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=axnmihn-research
+
+[Install]
+WantedBy=multi-user.target

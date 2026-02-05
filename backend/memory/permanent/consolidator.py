@@ -1,6 +1,6 @@
 """Memory consolidation service."""
 
-from typing import Dict, Any
+from typing import Dict
 
 from backend.core.logging import get_logger
 from .config import MemoryConfig

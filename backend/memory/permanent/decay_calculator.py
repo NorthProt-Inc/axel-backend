@@ -2,7 +2,6 @@
 
 import math
 from datetime import datetime
-from typing import Optional
 
 from backend.core.logging import get_logger
 from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver

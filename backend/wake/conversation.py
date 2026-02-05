@@ -5,7 +5,6 @@ import wave
 import tempfile
 import httpx
 import asyncio
-import subprocess
 from typing import Optional, List
 from backend.core.logging import get_logger
 

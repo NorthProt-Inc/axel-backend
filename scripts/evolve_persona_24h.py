@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from backend.config import PERSONA_PATH, DATA_ROOT, SQLITE_MEMORY_PATH
-from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
+from backend.core.utils.timezone import VANCOUVER_TZ
 CHECKPOINT_FILE = DATA_ROOT / "persona_insights_checkpoint.json"
 
 def humanize_role(role: str) -> str:

@@ -9,18 +9,15 @@ States:
 - HALF_OPEN: Testing if service recovered
 """
 
-from __future__ import annotations
-
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Dict, Optional, TypeVar
 
 from backend.core.logging import get_logger
 
 _log = get_logger("circuit_breaker")
-
 T = TypeVar("T")
 
 

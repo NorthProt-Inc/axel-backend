@@ -1,8 +1,6 @@
 """Tests for ChromaDBRepository."""
 
 import sys
-import pytest
-from unittest.mock import MagicMock
 
 sys.path.insert(0, "/home/northprot/projects/axnmihn")
 

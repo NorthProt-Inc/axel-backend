@@ -1,7 +1,6 @@
 """Tests for AdaptiveDecayCalculator."""
 
 import sys
-import pytest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 

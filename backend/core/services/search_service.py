@@ -6,7 +6,6 @@ Handles web search operations using Tavily API.
 
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from backend.core.logging import get_logger, request_tracker as rt
 from backend.config import MAX_SEARCH_CONTEXT_CHARS

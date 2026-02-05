@@ -1,9 +1,7 @@
 import os
 import numpy as np
 import pyaudio
-import openwakeword
 from openwakeword.model import Model
-from collections import deque
 from backend.core.logging import get_logger
 
 _log = get_logger("wake.detector")

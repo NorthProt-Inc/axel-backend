@@ -7,7 +7,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from backend.core.logging import get_logger
 from backend.config import SQLITE_MEMORY_PATH, MESSAGE_ARCHIVE_AFTER_DAYS, MESSAGE_SUMMARY_MODEL
-from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
+from backend.core.utils.timezone import VANCOUVER_TZ
 from backend.core.utils.text_utils import sanitize_memory_text
 
 # MESSAGE_ARCHIVE_AFTER_DAYS는 config.py에서 가져옴

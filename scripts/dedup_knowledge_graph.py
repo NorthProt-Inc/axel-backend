@@ -7,7 +7,7 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
-from typing import Dict, List, Tuple, Set, Optional
+from typing import List, Tuple, Optional
 
 from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent

@@ -16,7 +16,6 @@ from backend.config import (
     WORKING_MEMORY_PATH,
     SQLITE_MEMORY_PATH,
     CHROMADB_PATH,
-    PERSONA_PATH,
 )
 
 from backend.memory.permanent import LongTermMemory, MemoryConfig

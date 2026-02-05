@@ -4,8 +4,6 @@ Async task tracking system for long-running operations.
 Tracks progress of background tasks like Google Deep Research.
 """
 
-from __future__ import annotations
-
 import asyncio
 import uuid
 from dataclasses import dataclass, field

@@ -10,7 +10,6 @@ sys.path.insert(0, "/home/northprot/projects/axnmihn")
 
 from backend.memory.permanent.consolidator import MemoryConsolidator
 from backend.memory.permanent.decay_calculator import AdaptiveDecayCalculator
-from backend.memory.permanent.config import MemoryConfig
 
 VANCOUVER_TZ = ZoneInfo("America/Vancouver")
 

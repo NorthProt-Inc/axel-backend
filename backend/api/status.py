@@ -7,7 +7,7 @@ from backend.api.deps import is_request_authorized, is_api_key_configured, get_s
 from backend.core import get_code_summary, list_source_files
 from backend.core.logging import get_logger
 from backend.config import APP_VERSION
-from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
+from backend.core.utils.timezone import VANCOUVER_TZ
 
 _logger = get_logger("api.status")
 

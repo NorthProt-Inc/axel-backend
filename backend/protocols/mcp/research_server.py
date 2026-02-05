@@ -1,12 +1,11 @@
 import asyncio
-import json
 import random
 import re
 import sys
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 from urllib.parse import quote_plus, urljoin, urlparse
 
 AXEL_ROOT = Path(__file__).resolve().parents[3]
@@ -20,7 +19,6 @@ from backend.core.logging import get_logger
 from backend.core.research_artifacts import (
     process_content_for_artifact,
     read_artifact,
-    should_save_as_artifact,
     list_artifacts,
     ARTIFACT_THRESHOLD,
 )
@@ -787,7 +785,6 @@ async def run_stdio():
 async def run_sse(host: str = "0.0.0.0", port: int = 8765):
 
     from fastapi import FastAPI, Request
-    from sse_starlette.sse import EventSourceResponse
     from mcp.server.sse import SseServerTransport
     import uvicorn
 

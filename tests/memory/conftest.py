@@ -1,7 +1,7 @@
 """Pytest fixtures for memory module tests."""
 
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 from typing import Dict, List, Any
 from datetime import datetime
 from zoneinfo import ZoneInfo

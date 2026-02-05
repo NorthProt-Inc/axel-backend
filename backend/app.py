@@ -7,7 +7,6 @@ from typing import Optional
 import asyncio
 import os
 from uuid import uuid4
-from datetime import datetime
 from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
 from backend.config import (
     HOST,
@@ -19,7 +18,7 @@ from backend.config import (
 )
 from backend.core import IdentityManager
 from backend.memory import MemoryManager
-from backend.llm import get_llm_client, get_all_providers
+from backend.llm import get_all_providers
 from backend.llm.router import get_model
 from backend.core.logging import get_logger, set_request_id, reset_request_id, get_request_id
 _log = get_logger("app")

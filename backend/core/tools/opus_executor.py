@@ -3,7 +3,6 @@ import os
 import re
 import subprocess
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 from backend.core.logging import get_logger
 from backend.core.tools.opus_types import OpusResult, DelegationResult, OpusHealthStatus

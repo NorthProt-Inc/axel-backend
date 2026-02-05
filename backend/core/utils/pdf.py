@@ -1,7 +1,5 @@
-import io
 import base64
 import fitz
-from typing import Optional
 from backend.core.logging import get_logger
 
 _logger = get_logger("utils.pdf")

@@ -1,8 +1,7 @@
 import os
 import time
 from pathlib import Path
-from typing import List, Optional
-from datetime import datetime
+from typing import List
 
 from backend.core.logging import get_logger
 

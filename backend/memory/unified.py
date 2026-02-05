@@ -2,9 +2,9 @@ import asyncio
 import threading
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
-from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
+from backend.core.utils.timezone import VANCOUVER_TZ
 if TYPE_CHECKING:
-    from google.genai import Client as GenaiClient
+    pass
 from backend.core.logging import get_logger
 
 _log = get_logger("memory.unified")

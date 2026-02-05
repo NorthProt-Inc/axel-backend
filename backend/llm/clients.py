@@ -1,7 +1,7 @@
 import os
 import time
 from collections import deque
-from typing import Optional, AsyncGenerator, List, Dict, Any
+from typing import AsyncGenerator, List, Dict, Any
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from dotenv import load_dotenv
@@ -457,7 +457,6 @@ class GeminiClient(BaseLLMClient):
         images: List[Any] = None,
     ) -> str:
 
-        import asyncio
 
         text_content = prompt
         if system_prompt:

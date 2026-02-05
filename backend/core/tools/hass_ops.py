@@ -8,7 +8,7 @@ from enum import Enum
 import httpx
 from backend.core.logging import get_logger
 from backend.core.utils.http_pool import get_client
-from backend.core.utils.circuit_breaker import HASS_CIRCUIT, CircuitOpenError
+from backend.core.utils.circuit_breaker import HASS_CIRCUIT
 
 _log = get_logger("tools.hass")
 

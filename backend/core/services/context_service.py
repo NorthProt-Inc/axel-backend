@@ -8,7 +8,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, Dict, Any, List
+from typing import TYPE_CHECKING, Optional, Dict, Any
 
 from backend.core.context_optimizer import ContextOptimizer, get_dynamic_system_prompt
 from backend.core.logging import get_logger, request_tracker as rt

@@ -1,8 +1,7 @@
 """Tests for EmbeddingService."""
 
 import sys
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, "/home/northprot/projects/axnmihn")
 

@@ -1,12 +1,11 @@
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, Any
-from datetime import datetime
+from typing import Dict, List, Optional, Set, Any
 from collections import defaultdict
 from backend.core.logging import get_logger
 from backend.config import KNOWLEDGE_GRAPH_PATH, MEMORY_EXTRACTION_TIMEOUT
-from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
+from backend.core.utils.timezone import now_vancouver
 
 _log = get_logger("memory.graph")
 

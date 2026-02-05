@@ -1,13 +1,13 @@
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import List, Optional, Deque
+from typing import List, Deque
 from pathlib import Path
 import threading
 import uuid
 import json
 from backend.config import WORKING_MEMORY_PATH, CONTEXT_WORKING_TURNS, CONTEXT_SQL_PERSIST_TURNS
-from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver, ensure_aware
+from backend.core.utils.timezone import now_vancouver, ensure_aware
 from backend.core.utils.text_utils import sanitize_memory_text
 from backend.core.logging import get_logger
 

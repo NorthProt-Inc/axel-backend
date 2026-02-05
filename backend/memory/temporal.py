@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 
 from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
 from backend.core.logging import get_logger

@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 import sys
 import time
 from pathlib import Path
@@ -36,9 +37,7 @@ class GoogleResearchError(Exception):
 async def google_deep_research(query: str, depth: int = 3) -> str:
     """Google Deep Research 실행."""
 
-    try:
-        from google import genai
-    except ImportError:
+    if importlib.util.find_spec("google.genai") is None:
         return "Error: google-genai package not installed. Run: pip install google-genai"
 
     total_start = time.time()

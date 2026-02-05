@@ -4,10 +4,8 @@ import re
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
-from pydantic import BaseModel
 import aiofiles
 from backend.core.logging import get_logger
-from backend.media import transcribe_audio
 from backend.config import (
     ALLOWED_TEXT_EXTENSIONS,
     ALLOWED_IMAGE_EXTENSIONS,

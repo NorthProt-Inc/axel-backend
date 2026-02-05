@@ -1,10 +1,9 @@
 import asyncio
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, Sequence
+from typing import List, Sequence
 
 _AXEL_ROOT_TEMP = Path(__file__).parent.parent.parent.parent.resolve()
 sys.path.insert(0, str(_AXEL_ROOT_TEMP))
@@ -17,8 +16,6 @@ from backend.core.logging import get_logger
 from backend.core.tools.opus_types import OpusResult
 from backend.core.utils.opus_file_validator import (
     AXEL_ROOT,
-    OPUS_ALLOWED_EXTENSIONS as ALLOWED_EXTENSIONS,
-    OPUS_MAX_FILE_SIZE as MAX_FILE_SIZE,
     OPUS_MAX_FILES as MAX_FILES,
     OPUS_MAX_TOTAL_CONTEXT as MAX_TOTAL_CONTEXT,
     validate_opus_file_path as _validate_file_path,
@@ -433,7 +430,6 @@ async def run_stdio():
 async def run_sse(host: str = "0.0.0.0", port: int = 8766):
 
     from fastapi import FastAPI, Request
-    from sse_starlette.sse import EventSourceResponse
     from mcp.server.sse import SseServerTransport
     import uvicorn
 

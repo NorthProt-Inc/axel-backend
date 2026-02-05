@@ -1,12 +1,10 @@
 import json
 import os
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from pathlib import Path
 import tempfile
-from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
-import aiofiles
-from filelock import FileLock
+from backend.core.utils.timezone import VANCOUVER_TZ
 from backend.core.logging import get_logger
 
 _log = get_logger("core.ai_brain")

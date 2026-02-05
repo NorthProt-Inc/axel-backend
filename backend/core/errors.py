@@ -4,8 +4,6 @@ Structured error types for MCP tools.
 Provides consistent error classification and handling across all tools.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional

@@ -13,7 +13,7 @@ from backend.core.utils.text_utils import sanitize_memory_text
 from .config import MemoryConfig
 from .embedding_service import EmbeddingService
 from .repository import ChromaDBRepository
-from .decay_calculator import AdaptiveDecayCalculator, get_connection_count
+from .decay_calculator import AdaptiveDecayCalculator
 from .consolidator import MemoryConsolidator
 
 _log = get_logger("memory.permanent")

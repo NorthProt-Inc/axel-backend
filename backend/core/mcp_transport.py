@@ -9,7 +9,6 @@ Provides:
 
 import asyncio
 from typing import TYPE_CHECKING
-
 from backend.core.logging import get_logger
 from mcp.server.sse import SseServerTransport
 from mcp.server.stdio import stdio_server

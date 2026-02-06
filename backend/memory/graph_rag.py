@@ -9,6 +9,18 @@ from backend.core.utils.timezone import now_vancouver
 
 _log = get_logger("memory.graph")
 
+# Try to import native module for optimized graph operations
+try:
+    import axnmihn_native as _native
+    _HAS_NATIVE_GRAPH = True
+    _log.debug("Native graph_ops module loaded")
+except ImportError:
+    _native = None
+    _HAS_NATIVE_GRAPH = False
+
+# Minimum entity count to use native BFS (small graphs don't benefit)
+_NATIVE_BFS_THRESHOLD = 100
+
 @dataclass
 class Entity:
 
@@ -54,6 +66,12 @@ class KnowledgeGraph:
         self.adjacency: Dict[str, Set[str]] = defaultdict(set)
         self.persist_path = persist_path if persist_path else str(KNOWLEDGE_GRAPH_PATH)
 
+        # Native index (string↔int mapping for C++ graph_ops)
+        self._node_to_idx: Dict[str, int] = {}
+        self._idx_to_node: Dict[int, str] = {}
+        self._native_adjacency: Dict[int, list[int]] = {}
+        self._native_index_dirty: bool = True
+
         self._load()
 
     def add_entity(self, entity: Entity) -> str:
@@ -75,6 +93,7 @@ class KnowledgeGraph:
             entity.created_at = now_vancouver().isoformat()
             entity.last_accessed = entity.created_at
             self.entities[entity.id] = entity
+            self._native_index_dirty = True
 
         return entity.id
 
@@ -104,6 +123,7 @@ class KnowledgeGraph:
 
         self.adjacency[relation.source_id].add(relation.target_id)
         self.adjacency[relation.target_id].add(relation.source_id)
+        self._native_index_dirty = True
 
         return relation.id
 
@@ -126,11 +146,65 @@ class KnowledgeGraph:
             if e.entity_type == entity_type
         ]
 
+    def _rebuild_native_index(self) -> None:
+        """Rebuild string↔int mapping for native C++ graph_ops.
+
+        Maps entity string IDs to sequential integers and converts
+        the adjacency dict to int-keyed format for C++ consumption.
+        """
+        self._node_to_idx = {eid: i for i, eid in enumerate(self.entities)}
+        self._idx_to_node = {i: eid for eid, i in self._node_to_idx.items()}
+        self._native_adjacency = {}
+
+        for node_str, neighbors_str in self.adjacency.items():
+            if node_str in self._node_to_idx:
+                idx = self._node_to_idx[node_str]
+                self._native_adjacency[idx] = [
+                    self._node_to_idx[n]
+                    for n in neighbors_str
+                    if n in self._node_to_idx
+                ]
+
+        self._native_index_dirty = False
+        _log.debug(
+            "Native graph index rebuilt",
+            nodes=len(self._node_to_idx),
+            edges=sum(len(v) for v in self._native_adjacency.values()),
+        )
+
     def get_neighbors(self, entity_id: str, depth: int = 1) -> Set[str]:
-        """Get neighboring entity IDs up to specified depth."""
+        """Get neighboring entity IDs up to specified depth.
+
+        Uses native C++ BFS when available and graph has >= 100 entities.
+        Falls back to Python BFS otherwise.
+        """
         if entity_id not in self.entities:
             return set()
 
+        use_native = (
+            _HAS_NATIVE_GRAPH
+            and len(self.entities) >= _NATIVE_BFS_THRESHOLD
+        )
+
+        if use_native:
+            if self._native_index_dirty:
+                self._rebuild_native_index()
+
+            start_idx = self._node_to_idx.get(entity_id)
+            if start_idx is None:
+                return set()
+
+            visited_indices = _native.graph_ops.bfs_neighbors(
+                self._native_adjacency, [start_idx], depth
+            )
+            # Convert back to string IDs, exclude start node
+            return {
+                self._idx_to_node[idx]
+                for idx in visited_indices
+                if idx in self._idx_to_node and idx != start_idx
+            }
+
+        # Python fallback
         visited = {entity_id}
         frontier = {entity_id}
 
@@ -248,6 +322,7 @@ class KnowledgeGraph:
                 self.adjacency[rel.source_id].add(rel.target_id)
                 self.adjacency[rel.target_id].add(rel.source_id)
 
+            self._native_index_dirty = True
             _log.debug("MEM graph_load", entities=len(self.entities), rels=len(self.relations))
 
         except Exception as e:

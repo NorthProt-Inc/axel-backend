@@ -3,7 +3,6 @@ import random
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Set, TypeVar
-
 from backend.core.logging import get_logger
 
 _logger = get_logger("retry")

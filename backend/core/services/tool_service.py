@@ -72,60 +72,61 @@ class ToolExecutionService:
             _log.error("No MCP client available for tool execution")
             return ToolExecutionResult()
 
-        results = []
-        deferred_tools = []
-        tool_outputs = []
+        deferred_tools: List[Tuple[str, Dict[str, Any]]] = []
+        deferred_results: List[ToolResult] = []
+        deferred_outputs: List[str] = []
 
+        immediate_calls: List[Dict[str, Any]] = []
+
+        # Partition into deferred vs immediate
         for fc in function_calls:
             tool_name = fc["name"]
             tool_args = fc.get("args", {})
 
-            # Check if fire-and-forget
             if self.is_fire_and_forget(tool_name):
                 deferred_tools.append((tool_name, tool_args))
-                tool_outputs.append(f"✓ {tool_name}: (queued for background execution)")
-                results.append(ToolResult(
+                deferred_outputs.append(f"✓ {tool_name}: (queued for background execution)")
+                deferred_results.append(ToolResult(
                     name=tool_name,
                     output="(deferred)",
-                    success=True
+                    success=True,
                 ))
                 _log.debug("TOOL deferred", name=tool_name)
-                continue
+            else:
+                immediate_calls.append(fc)
 
-            # Execute tool
-            try:
-                result = await self.mcp_client.call_tool(tool_name, tool_args)
-                success = result.get("success", False)
-                output_text = result.get("result", "")
+        # Execute immediate tools in parallel
+        immediate_results = await asyncio.gather(
+            *(self._execute_single(fc["name"], fc.get("args", {})) for fc in immediate_calls)
+        ) if immediate_calls else []
 
-                log_msg = f" {tool_name}: {output_text}"
-                tool_outputs.append(log_msg)
-                results.append(ToolResult(
-                    name=tool_name,
-                    output=output_text,
-                    success=success
-                ))
-                _log.info("TOOL exec", name=tool_name, success=success)
+        # Merge results preserving order: deferred first, then immediate
+        results = deferred_results + [r for r, _ in immediate_results]
+        tool_outputs = deferred_outputs + [o for _, o in immediate_results]
 
-            except Exception as e:
-                error_msg = f" {tool_name} Error: {str(e)}"
-                tool_outputs.append(error_msg)
-                results.append(ToolResult(
-                    name=tool_name,
-                    output="",
-                    success=False,
-                    error=str(e)
-                ))
-                _log.error("TOOL fail", name=tool_name, error=str(e))
-
-        # Build observation string
         observation = "\n".join(tool_outputs) if tool_outputs else ""
 
         return ToolExecutionResult(
             results=results,
             deferred_tools=deferred_tools,
-            observation=observation
+            observation=observation,
         )
+
+    async def _execute_single(
+        self, tool_name: str, tool_args: Dict[str, Any]
+    ) -> Tuple[ToolResult, str]:
+        """Execute a single tool call and return (ToolResult, output_line)."""
+        try:
+            result = await self.mcp_client.call_tool(tool_name, tool_args)
+            success = result.get("success", False)
+            output_text = result.get("result", "")
+            log_msg = f" {tool_name}: {output_text}"
+            _log.info("TOOL exec", name=tool_name, success=success)
+            return ToolResult(name=tool_name, output=output_text, success=success), log_msg
+        except Exception as e:
+            error_msg = f" {tool_name} Error: {str(e)}"
+            _log.error("TOOL fail", name=tool_name, error=str(e))
+            return ToolResult(name=tool_name, output="", success=False, error=str(e)), error_msg
 
     async def execute_deferred_tools(
         self,

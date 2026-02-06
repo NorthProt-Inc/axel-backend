@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Any, Set
 from backend.core.logging import get_logger
 from backend.config import CHROMADB_PATH
 from backend.core.utils.timezone import now_vancouver
-from backend.core.utils.text_utils import sanitize_memory_text
 
 from .config import MemoryConfig
 from .embedding_service import EmbeddingService
@@ -295,9 +294,6 @@ class LongTermMemory:
         Returns:
             Document ID or None if rejected
         """
-        # Sanitize content
-        content = sanitize_memory_text(content)
-
         content_key = self._get_content_key(content)
         self._repetition_cache[content_key] = self._repetition_cache.get(content_key, 0) + 1
         repetitions = self._repetition_cache[content_key]

@@ -13,8 +13,8 @@ DEFAULT_GEMINI_MODEL = os.getenv("DEFAULT_GEMINI_MODEL", "gemini-3-flash-preview
 DEFAULT_THINKING_LEVEL = "high"
 
 # Chat response model (separate from utility tasks)
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3-pro-preview")
-CHAT_THINKING_LEVEL = "low"
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3-flash-preview")
+CHAT_THINKING_LEVEL = "high"
 
 MODEL_NAME = CHAT_MODEL
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
@@ -53,6 +53,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 BACKEND_ROOT = Path(__file__).parent.resolve()
 
 DATA_ROOT = PROJECT_ROOT / "data"
+TEMP_DIR = DATA_ROOT / "tmp"
 
 WORKING_MEMORY_PATH = DATA_ROOT / "working_memory.json"
 SQLITE_MEMORY_PATH = DATA_ROOT / "sqlite" / "sqlite_memory.db"
@@ -77,6 +78,7 @@ def ensure_data_directories() -> None:
     """Create required data directories if they don't exist."""
     directories = [
         DATA_ROOT,
+        TEMP_DIR,
         CHROMADB_PATH,
         STORAGE_ROOT,
         RESEARCH_INBOX_DIR,
@@ -145,22 +147,32 @@ def _get_int_env(name: str, default: int) -> int:
         _logger.warning("Invalid int env", env=name, value=raw)
         return default
 
-MEMORY_WORKING_BUDGET = _get_int_env("MEMORY_WORKING_BUDGET", 150000)
-MEMORY_LONG_TERM_BUDGET = _get_int_env("MEMORY_LONG_TERM_BUDGET", 120000)
-MEMORY_SESSION_ARCHIVE_BUDGET = _get_int_env("MEMORY_SESSION_ARCHIVE_BUDGET", 90000)
-MEMORY_TIME_CONTEXT_BUDGET = _get_int_env("MEMORY_TIME_CONTEXT_BUDGET", 15000)
+# Context section budgets (chars). 30-turn working memory baseline.
+#   working: 30 turns × 2 msgs × ~2K chars ≈ 120K, with headroom
+#   long_term: ChromaDB top-20 × ~500 chars + metadata
+#   graphrag: entity/relation context, usually compact
+BUDGET_SYSTEM_PROMPT = _get_int_env("BUDGET_SYSTEM_PROMPT", 20_000)
+BUDGET_TEMPORAL = _get_int_env("BUDGET_TEMPORAL", 5_000)
+BUDGET_WORKING_MEMORY = _get_int_env("BUDGET_WORKING_MEMORY", 150_000)
+BUDGET_LONG_TERM = _get_int_env("BUDGET_LONG_TERM", 50_000)
+BUDGET_GRAPHRAG = _get_int_env("BUDGET_GRAPHRAG", 20_000)
+
+# Legacy token-based aliases (chars / 4) used by memgpt budget_select
+MEMORY_LONG_TERM_BUDGET = BUDGET_LONG_TERM // 4
+MEMORY_TIME_CONTEXT_BUDGET = BUDGET_TEMPORAL // 4
 
 MAX_CONTEXT_TOKENS = (
-    MEMORY_WORKING_BUDGET +
-    MEMORY_LONG_TERM_BUDGET +
-    MEMORY_SESSION_ARCHIVE_BUDGET +
-    MEMORY_TIME_CONTEXT_BUDGET
-)
+    BUDGET_WORKING_MEMORY +
+    BUDGET_LONG_TERM +
+    BUDGET_TEMPORAL +
+    BUDGET_SYSTEM_PROMPT +
+    BUDGET_GRAPHRAG
+) // 4
 
 MAX_RESEARCH_CONTENT_TOKENS = _get_int_env("MAX_RESEARCH_CONTENT_TOKENS", 150000)
 
 MAX_MEMORY_CONTEXT_CHARS = {
-    "axel": _get_int_env("MAX_MEMORY_CONTEXT_CHARS_AXEL", 2_000_000),
+    "axel": _get_int_env("MAX_MEMORY_CONTEXT_CHARS_AXEL", 1_000_000),
 }
 
 MAX_SEARCH_CONTEXT_CHARS = _get_int_env("MAX_SEARCH_CONTEXT_CHARS", 300_000)
@@ -242,8 +254,6 @@ OPUS_COMMAND_TIMEOUT = _get_int_env("OPUS_COMMAND_TIMEOUT", 600)
 # =============================================================================
 # Context Building
 # =============================================================================
-CONTEXT_SESSION_COUNT = _get_int_env("CONTEXT_SESSION_COUNT", 30)
-CONTEXT_SESSION_BUDGET = _get_int_env("CONTEXT_SESSION_BUDGET", 60000)
 CONTEXT_SQL_PERSIST_TURNS = _get_int_env("CONTEXT_SQL_PERSIST_TURNS", 10)
 
 # =============================================================================

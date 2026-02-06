@@ -14,7 +14,6 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar, ParamSpec
-
 from backend.core.logging import get_logger
 
 _log = get_logger("cache")

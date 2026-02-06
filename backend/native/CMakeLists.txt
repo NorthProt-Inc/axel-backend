@@ -39,6 +39,7 @@ set(SOURCES
     src/vector_ops.cpp
     src/graph_ops.cpp
     src/string_ops.cpp
+    src/text_ops.cpp
 )
 
 # Create the Python module

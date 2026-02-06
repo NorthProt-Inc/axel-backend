@@ -10,10 +10,13 @@ from .memory_server import (
     retrieve_context as retrieve_context,
     get_recent_logs as get_recent_logs,
 )
-from .research_server import (
+from .research.search_engines import (
     search_duckduckgo as search_duckduckgo,
-    _visit_page as _visit_page,
-    _deep_dive as _deep_dive,
-    _tavily_search as _tavily_search,
+    tavily_search as _tavily_search,
+    web_search as _google_search,
+)
+from .research.page_visitor import (
+    visit_page as _visit_page,
+    deep_dive as _deep_dive,
 )
 from backend.core.tools.opus_executor import _generate_task_summary as _generate_task_summary

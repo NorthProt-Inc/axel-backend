@@ -1,14 +1,15 @@
-import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+from backend.core.security.path_security import PathAccessType, get_path_security
+
 AXEL_ROOT = Path(__file__).parent.parent.parent.parent.resolve()
 
-OPUS_ALLOWED_EXTENSIONS = {
+OPUS_ALLOWED_EXTENSIONS = frozenset({
     ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml",
     ".md", ".txt", ".html", ".css", ".scss", ".sql", ".sh", ".bash",
     ".env.example", ".toml", ".cfg", ".ini",
-}
+})
 OPUS_MAX_FILE_SIZE = 500 * 1024        # 500KB
 OPUS_MAX_FILES = 20
 OPUS_MAX_TOTAL_CONTEXT = 1024 * 1024   # 1MB
@@ -20,33 +21,18 @@ def validate_opus_file_path(file_path: str) -> Tuple[bool, Optional[Path], Optio
     Returns:
         (valid, resolved_path, error_message)
     """
-    try:
-        if not os.path.isabs(file_path):
-            resolved = (AXEL_ROOT / file_path).resolve()
-        else:
-            resolved = Path(file_path).resolve()
-
-        try:
-            resolved.relative_to(AXEL_ROOT)
-        except ValueError:
-            return False, None, f"Path '{file_path}' is outside project root"
-
-        if not resolved.exists():
-            return False, None, f"File not found: {file_path}"
-
-        if not resolved.is_file():
-            return False, None, f"Not a file: {file_path}"
-
-        if resolved.suffix.lower() not in OPUS_ALLOWED_EXTENSIONS:
-            return False, None, f"File extension not allowed: {resolved.suffix}"
-
-        if resolved.stat().st_size > OPUS_MAX_FILE_SIZE:
-            return False, None, f"File too large (>{OPUS_MAX_FILE_SIZE // 1024}KB): {file_path}"
-
-        return True, resolved, None
-
-    except Exception as e:
-        return False, None, f"Path validation error: {str(e)}"
+    psm = get_path_security()
+    result = psm.validate(
+        file_path,
+        PathAccessType.OPUS_DELEGATE,
+        must_exist=True,
+        must_be_file=True,
+        max_size=OPUS_MAX_FILE_SIZE,
+        allowed_extensions=OPUS_ALLOWED_EXTENSIONS,
+    )
+    if result.valid:
+        return True, result.resolved_path, None
+    return False, None, result.error
 
 
 def read_opus_file_content(file_path: Path) -> str:

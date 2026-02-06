@@ -2,7 +2,6 @@ import os
 import time
 from pathlib import Path
 from typing import List
-
 from backend.core.logging import get_logger
 
 _logger = get_logger("file_utils")
@@ -50,7 +49,7 @@ def cleanup_orphaned_tmp_files(dir_path: Path) -> int:
                 pass
             except Exception as e:
                 _logger.warning("Cleanup error", file=p.name, error=str(e))
-    except Exception as e:
+    except Exception:
         _logger.exception("Directory scan error", path=str(dir_path))
 
     return deleted
@@ -68,7 +67,7 @@ async def startup_cleanup(data_dirs: List[Path]) -> int:
                 timeout_seconds=10.0
             )
             total += count
-        except Exception as e:
+        except Exception:
             _logger.exception("Startup cleanup error", path=str(dir_path))
 
     if total > 0:

@@ -1,6 +1,7 @@
 """Memory configuration settings."""
 
 from backend.config import (
+    EMBEDDING_MODEL,
     MEMORY_BASE_DECAY_RATE,
     MEMORY_MIN_RETENTION,
     MEMORY_DECAY_DELETE_THRESHOLD,
@@ -32,7 +33,7 @@ class MemoryConfig:
     MIN_REPETITIONS = 1
     SIMILAR_THRESHOLD = 0.75
     PRESERVE_REPETITIONS = 3
-    EMBEDDING_MODEL = "models/gemini-embedding-001"
+    EMBEDDING_MODEL = EMBEDDING_MODEL
 
     # Embedding cache settings
     EMBEDDING_CACHE_SIZE = 256

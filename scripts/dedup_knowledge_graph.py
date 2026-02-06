@@ -188,8 +188,71 @@ def find_duplicates(entities: dict, threshold: float = 0.85) -> List[Tuple[str, 
 
     return duplicates
 
-def find_dead_entities(entities: dict, relations: dict, min_age_days: int = 7) -> List[str]:
+def _find_isolated_clusters(
+    entities: dict,
+    relations: dict,
+    max_cluster_size: int = 3,
+) -> list[str]:
+    """Find entities in small isolated clusters using native connected components.
 
+    Identifies clusters disconnected from the main graph that have
+    at most max_cluster_size nodes. These are candidates for cleanup.
+
+    Args:
+        entities: Entity dict from knowledge graph
+        relations: Relation dict from knowledge graph
+        max_cluster_size: Maximum cluster size to consider as isolated
+
+    Returns:
+        List of entity IDs in small isolated clusters
+    """
+    if not _HAS_NATIVE or len(entities) < 10:
+        return []
+
+    # Build string↔int mapping
+    entity_ids = list(entities.keys())
+    node_to_idx = {eid: i for i, eid in enumerate(entity_ids)}
+    n_nodes = len(entity_ids)
+
+    # Build int-keyed adjacency list
+    adjacency: dict[int, list[int]] = defaultdict(list)
+    for rel in relations.values():
+        src = rel.get("source_id")
+        tgt = rel.get("target_id")
+        if src in node_to_idx and tgt in node_to_idx:
+            si, ti = node_to_idx[src], node_to_idx[tgt]
+            adjacency[si].append(ti)
+            adjacency[ti].append(si)
+
+    components = _native.graph_ops.find_connected_components(
+        dict(adjacency), n_nodes
+    )
+
+    # Count nodes per component
+    comp_sizes: dict[int, int] = defaultdict(int)
+    for comp_id in components:
+        comp_sizes[comp_id] += 1
+
+    # Find the main component (largest)
+    if not comp_sizes:
+        return []
+    main_comp = max(comp_sizes, key=lambda c: comp_sizes[c])
+
+    # Collect nodes from small non-main clusters
+    isolated = []
+    for i, comp_id in enumerate(components):
+        if comp_id != main_comp and comp_sizes[comp_id] <= max_cluster_size:
+            isolated.append(entity_ids[i])
+
+    return isolated
+
+
+def find_dead_entities(entities: dict, relations: dict, min_age_days: int = 7) -> List[str]:
+    """Find dead entities: no mentions, no relations, and old enough.
+
+    Also detects small isolated clusters (<=3 nodes) disconnected from
+    the main graph using native connected components analysis.
+    """
     dead = []
     cutoff = datetime.now().astimezone() - timedelta(days=min_age_days)
 
@@ -211,8 +274,25 @@ def find_dead_entities(entities: dict, relations: dict, min_age_days: int = 7) -
                 if created < cutoff:
                     dead.append(eid)
             except ValueError:
-                # 파싱 불가 날짜 → 오래된 것으로 간주
                 dead.append(eid)
+
+    # Additionally detect small isolated clusters via native graph_ops
+    isolated = _find_isolated_clusters(entities, relations)
+    if isolated:
+        dead_set = set(dead)
+        for eid in isolated:
+            if eid not in dead_set:
+                # Only add if entity is old enough (same age check)
+                created_str = entities[eid].get("created_at", "")
+                if created_str:
+                    try:
+                        created = datetime.fromisoformat(created_str)
+                        if created < cutoff:
+                            dead.append(eid)
+                            dead_set.add(eid)
+                    except ValueError:
+                        dead.append(eid)
+                        dead_set.add(eid)
 
     return dead
 

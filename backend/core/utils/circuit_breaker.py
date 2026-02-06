@@ -14,7 +14,6 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Optional, TypeVar
-
 from backend.core.logging import get_logger
 
 _log = get_logger("circuit_breaker")

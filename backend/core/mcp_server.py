@@ -18,7 +18,6 @@ except Exception:
 import asyncio
 from pathlib import Path
 from typing import Any, Sequence
-
 from backend.core.logging import get_logger
 from mcp.server import Server
 from mcp.types import Resource, Tool, TextContent, TextResourceContents

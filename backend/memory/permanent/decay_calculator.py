@@ -2,7 +2,7 @@
 
 import math
 from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import List, Optional
 
 from backend.core.logging import get_logger
 from backend.core.utils.timezone import VANCOUVER_TZ, now_vancouver
@@ -234,7 +234,6 @@ class AdaptiveDecayCalculator:
             return [p["importance"] if p else 0.5 for p in processed]
 
         # Build numpy arrays
-        n = len(valid_data)
         importance = np.array([d["importance"] for d in valid_data], dtype=np.float64)
         hours_passed = np.array([d["hours_passed"] for d in valid_data], dtype=np.float64)
         access_count = np.array([d["access_count"] for d in valid_data], dtype=np.int32)

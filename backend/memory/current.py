@@ -8,7 +8,6 @@ import uuid
 import json
 from backend.config import WORKING_MEMORY_PATH, CONTEXT_WORKING_TURNS, CONTEXT_SQL_PERSIST_TURNS
 from backend.core.utils.timezone import now_vancouver, ensure_aware
-from backend.core.utils.text_utils import sanitize_memory_text
 from backend.core.logging import get_logger
 
 _log = get_logger("memory.current")
@@ -90,8 +89,6 @@ class WorkingMemory:
     def add(self, role: str, content: str, emotional_context: str = "neutral") -> TimestampedMessage:
 
         normalized_role = normalize_role(role)
-        # 텍스트 정제 (이모지, 특수문자 제거)
-        content = sanitize_memory_text(content)
 
         msg = TimestampedMessage(
             role=normalized_role,

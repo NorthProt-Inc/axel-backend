@@ -27,6 +27,14 @@ from collections import defaultdict
 init_state = None
 import hashlib
 
+# Try to import native module for optimized vector operations
+try:
+    import axnmihn_native as _native
+    _HAS_NATIVE = True
+except ImportError:
+    _native = None
+    _HAS_NATIVE = False
+
 SIZE_THRESHOLD = 50_000
 OVERSIZED_PATTERNS = [
     "data:image/png;base64,",
@@ -79,44 +87,124 @@ def phase1_hash_dedup(ltm, all_data, dry_run: bool = False) -> list:
 
     return duplicates_to_delete
 
-def phase2_semantic_dedup(ltm, dry_run: bool = False) -> list:
+def _phase2_native(ltm, threshold: float) -> list[dict]:
+    """Phase 2 implementation using native C++ vector_ops.
 
-    print(f"\n[Phase 2] Semantic deduplication (threshold: {MemoryConfig.DUPLICATE_THRESHOLD})...")
+    Fetches all embeddings from ChromaDB in a single call, then uses
+    native find_duplicates_by_embedding for O(N^2) batch comparison.
+    Eliminates per-memory API calls entirely.
 
-    results = ltm.get_all_memories(include=["documents", "metadatas"])
+    Args:
+        ltm: LongTermMemory instance
+        threshold: Similarity threshold for duplicate detection
 
-    if not results['ids']:
-        print("  No memories to check.")
+    Returns:
+        List of duplicate dicts with id, original_id, similarity, preview
+    """
+    import numpy as np
+
+    results = ltm.get_all_memories(
+        include=["documents", "metadatas", "embeddings"]
+    )
+
+    if not results["ids"] or not results.get("embeddings"):
         return []
 
-    total = len(results['ids'])
-    to_delete = []
-    keep_ids = set()
+    ids = results["ids"]
+    docs = results["documents"] or [""] * len(ids)
+    embeddings_raw = results["embeddings"]
+    metadatas = results["metadatas"] or [{}] * len(ids)
+
+    # Filter out entries without valid embeddings
+    valid_indices: list[int] = []
+    valid_embeddings: list[list[float]] = []
+    for i, emb in enumerate(embeddings_raw):
+        if emb is not None and len(emb) > 0:
+            valid_indices.append(i)
+            valid_embeddings.append(emb)
+
+    if len(valid_embeddings) < 2:
+        return []
+
+    embeddings = np.array(valid_embeddings, dtype=np.float64)
+    print(f"  Native batch: {len(valid_embeddings)} embeddings, dim={embeddings.shape[1]}")
+
+    dup_pairs = _native.vector_ops.find_duplicates_by_embedding(embeddings, threshold)
+    print(f"  Found {len(dup_pairs)} duplicate pairs via native")
+
+    # For each pair, decide which to keep (higher importance wins)
+    to_delete: list[dict] = []
+    delete_ids: set[str] = set()
+
+    for vi, vj, sim in dup_pairs:
+        idx_i = valid_indices[vi]
+        idx_j = valid_indices[vj]
+        id_i = ids[idx_i]
+        id_j = ids[idx_j]
+
+        if id_i in delete_ids and id_j in delete_ids:
+            continue
+
+        meta_i = metadatas[idx_i] or {}
+        meta_j = metadatas[idx_j] or {}
+        imp_i = meta_i.get("importance", 0.5)
+        imp_j = meta_j.get("importance", 0.5)
+
+        # Keep the one with higher importance
+        if imp_i >= imp_j:
+            keep_id, remove_id, remove_idx = id_i, id_j, idx_j
+        else:
+            keep_id, remove_id, remove_idx = id_j, id_i, idx_i
+
+        if remove_id not in delete_ids:
+            delete_ids.add(remove_id)
+            preview = (docs[remove_idx] or "")[:50]
+            to_delete.append({
+                "id": remove_id,
+                "original_id": keep_id,
+                "similarity": sim,
+                "preview": preview,
+            })
+
+    return to_delete
+
+
+def _phase2_python(ltm, threshold: float) -> list[dict]:
+    """Phase 2 fallback using per-memory API calls.
+
+    Args:
+        ltm: LongTermMemory instance
+        threshold: Similarity threshold for duplicate detection
+
+    Returns:
+        List of duplicate dicts with id, original_id, similarity, preview
+    """
+    results = ltm.get_all_memories(include=["documents", "metadatas"])
+
+    if not results["ids"]:
+        return []
+
+    total = len(results["ids"])
+    to_delete: list[dict] = []
+    keep_ids: set[str] = set()
+    delete_id_set: set[str] = set()
 
     batch_size = 50
     processed = 0
 
     for i in range(total):
-        doc_id = results['ids'][i]
-        doc_content = results['documents'][i] if results['documents'] else ""
+        doc_id = results["ids"][i]
+        doc_content = results["documents"][i] if results["documents"] else ""
 
-        if doc_id in [d['id'] for d in to_delete] or doc_id in keep_ids:
+        if doc_id in delete_id_set or doc_id in keep_ids:
             continue
 
         if not doc_content:
             continue
 
-        embedding = ltm.get_embedding_for_text(doc_content[:500], task_type="retrieval_query")
-        if embedding is None:
-            continue
-
-        if hasattr(embedding, 'tolist'):
-            embedding = embedding.tolist()
-
-        # Use the new API: find_similar_memories returns list of dicts
         similar = ltm.find_similar_memories(
             content=doc_content[:500],
-            threshold=0.0,  # Return all, we filter by similarity manually
+            threshold=0.0,
             n_results=5,
         )
 
@@ -125,37 +213,58 @@ def phase2_semantic_dedup(ltm, dry_run: bool = False) -> list:
             print(f"  Processed {processed}/{total} documents...")
 
         for sim_mem in similar:
-            sim_id = sim_mem.get('id')
-            similarity = sim_mem.get('similarity', 0)
+            sim_id = sim_mem.get("id")
+            similarity = sim_mem.get("similarity", 0)
 
             if sim_id == doc_id:
                 continue
 
-            if similarity >= MemoryConfig.DUPLICATE_THRESHOLD and sim_id not in keep_ids:
-                if sim_id not in [d['id'] for d in to_delete]:
-                    preview = sim_mem.get('content', '')[:50]
+            if similarity >= threshold and sim_id not in keep_ids:
+                if sim_id not in delete_id_set:
+                    preview = sim_mem.get("content", "")[:50]
                     to_delete.append({
-                        'id': sim_id,
-                        'original_id': doc_id,
-                        'similarity': similarity,
-                        'preview': preview
+                        "id": sim_id,
+                        "original_id": doc_id,
+                        "similarity": similarity,
+                        "preview": preview,
                     })
+                    delete_id_set.add(sim_id)
 
         keep_ids.add(doc_id)
+
+    return to_delete
+
+
+def phase2_semantic_dedup(ltm, dry_run: bool = False) -> list:
+    """Phase 2: Semantic deduplication using embedding similarity.
+
+    Uses native C++ vector_ops when available for batch processing
+    (single DB call + C++ AVX2 O(N^2) comparison).
+    Falls back to per-memory API calls otherwise.
+    """
+    threshold = MemoryConfig.DUPLICATE_THRESHOLD
+    print(f"\n[Phase 2] Semantic deduplication (threshold: {threshold})...")
+
+    if _HAS_NATIVE:
+        print("  Using native vector_ops (batch mode)")
+        to_delete = _phase2_native(ltm, threshold)
+    else:
+        print("  Using Python fallback (per-memory API calls)")
+        to_delete = _phase2_python(ltm, threshold)
 
     if to_delete:
         for d in to_delete:
             print(f"  [{d['similarity']:.2f}] {d['preview']}...")
 
         if not dry_run:
-            ltm.delete_memories([d['id'] for d in to_delete])
+            ltm.delete_memories([d["id"] for d in to_delete])
             print(f"  Deleted {len(to_delete)} semantic duplicates")
         else:
-             print(f"  [DRY RUN] Would delete {len(to_delete)} semantic duplicates")
+            print(f"  [DRY RUN] Would delete {len(to_delete)} semantic duplicates")
     else:
         print("  No semantic duplicates found.")
 
-    return [d['id'] for d in to_delete]
+    return [d["id"] for d in to_delete]
 
 def phase3_consolidation(ltm, dry_run: bool = False) -> dict:
 
@@ -318,7 +427,7 @@ def phase9_knowledge_graph_prune(min_age_days: int = 7, dry_run: bool = False) -
                         created = created.replace(tzinfo=VANCOUVER_TZ)
                     if created < cutoff:
                         to_delete.append(eid)
-                except (ValueError, TypeError, AttributeError) as e:
+                except (ValueError, TypeError, AttributeError):
 
                     pass
 
@@ -357,7 +466,7 @@ def phase9_knowledge_graph_prune(min_age_days: int = 7, dry_run: bool = False) -
                     if not dry_run and hasattr(rel, 'weight'):
                         rel.weight = new_weight
                     decayed_relations += 1
-            except (ValueError, TypeError, AttributeError) as e:
+            except (ValueError, TypeError, AttributeError):
 
                 pass
 
@@ -402,7 +511,8 @@ async def main_async(dry_run: bool = False):
     try:
         from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
 
-        gemini_model = GenerativeModelWrapper(client_or_model='gemini-3-pro-preview')
+        from backend.config import DEFAULT_GEMINI_MODEL
+        gemini_model = GenerativeModelWrapper(client_or_model=DEFAULT_GEMINI_MODEL)
         memory_manager = MemoryManager(model=gemini_model)
     except Exception as e:
         print(f"Note: MemoryManager not available ({e})")

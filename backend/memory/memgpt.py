@@ -7,18 +7,14 @@ _log = get_logger("memory.memgpt")
 
 from backend.config import (
     MAX_CONTEXT_TOKENS as CONFIG_MAX_CONTEXT_TOKENS,
-    MEMORY_WORKING_BUDGET,
     MEMORY_LONG_TERM_BUDGET,
-    MEMORY_SESSION_ARCHIVE_BUDGET,
 )
 
 @dataclass
 class MemGPTConfig:
 
     max_context_tokens: int = CONFIG_MAX_CONTEXT_TOKENS
-    working_budget: int = MEMORY_WORKING_BUDGET
     long_term_budget: int = MEMORY_LONG_TERM_BUDGET
-    session_archive_budget: int = MEMORY_SESSION_ARCHIVE_BUDGET
 
     eviction_score_threshold: float = 0.1  # 0.3 → 0.1 (permanent.py와 일관성)
     min_memories_keep: int = 3

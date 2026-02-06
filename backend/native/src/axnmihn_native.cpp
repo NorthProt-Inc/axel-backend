@@ -6,6 +6,7 @@
 #include "vector_ops.hpp"
 #include "graph_ops.hpp"
 #include "string_ops.hpp"
+#include "text_ops.hpp"
 
 namespace py = pybind11;
 
@@ -230,6 +231,19 @@ PYBIND11_MODULE(axnmihn_native, m) {
     string_m.def("string_similarity_batch", &axnmihn::string_ops::string_similarity_batch,
         "Batch calculate string similarities",
         py::arg("query"), py::arg("targets"));
+
+    // ====================
+    // Text Operations
+    // ====================
+    py::module text_m = m.def_submodule("text_ops", "Korean text processing operations");
+
+    text_m.def("fix_korean_spacing", &axnmihn::text_ops::fix_korean_spacing,
+        "Fix Korean spacing around punctuation and bracket boundaries",
+        py::arg("text"));
+
+    text_m.def("fix_korean_spacing_batch", &axnmihn::text_ops::fix_korean_spacing_batch,
+        "Batch fix Korean spacing",
+        py::arg("texts"));
 
     // ====================
     // Module Info

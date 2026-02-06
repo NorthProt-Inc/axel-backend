@@ -6,7 +6,42 @@ from typing import Dict, List, Any
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from backend.memory.recent.connection import SQLiteConnectionManager
+from backend.memory.recent.interaction_logger import InteractionLogger
+from backend.memory.recent.repository import SessionRepository
+from backend.memory.recent.schema import SchemaManager
+
 VANCOUVER_TZ = ZoneInfo("America/Vancouver")
+
+
+# ── Shared fixtures for recent/ module tests ────────────────────────────────
+
+
+@pytest.fixture
+def connection_manager(tmp_path):
+    """Fresh SQLiteConnectionManager with a temp DB file."""
+    mgr = SQLiteConnectionManager(db_path=tmp_path / "test_session.db")
+    yield mgr
+    mgr.close()
+
+
+@pytest.fixture
+def initialized_db(connection_manager):
+    """ConnectionManager with schema already initialized."""
+    SchemaManager(connection_manager).initialize()
+    return connection_manager
+
+
+@pytest.fixture
+def session_repository(initialized_db):
+    """SessionRepository backed by an initialized temp DB."""
+    return SessionRepository(initialized_db)
+
+
+@pytest.fixture
+def interaction_logger(initialized_db):
+    """InteractionLogger backed by an initialized temp DB."""
+    return InteractionLogger(initialized_db)
 
 
 @pytest.fixture

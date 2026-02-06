@@ -240,6 +240,9 @@ class IdentityManager:
 
 ## 관계 메모 (Relationship Notes)
 {notes_text}
+
+## 기억 활용 지침
+- 장기 기억에 포함된 [시간] 라벨을 참고하여 기억의 신선도를 판단해.
 """
         return prompt
 

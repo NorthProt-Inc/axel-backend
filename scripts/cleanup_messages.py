@@ -42,7 +42,8 @@ BACKUP_DIR = Path("/home/northprot/backups/axnmihn")
 
 BATCH_SIZE = 50
 PARALLEL_WORKERS = 10  # 동시 처리 수
-MODEL_NAME = "gemini-3-pro-preview"
+from backend.config import DEFAULT_GEMINI_MODEL
+MODEL_NAME = DEFAULT_GEMINI_MODEL
 
 CLEANUP_PROMPT = """이 대화 메시지를 정리해주세요:
 1. 불필요한 로그/메타정보 제거 (예: [System Log: ...], 타임스탬프, 에러 스택트레이스)

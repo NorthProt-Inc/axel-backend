@@ -16,7 +16,7 @@ os.chdir(str(PROJECT_ROOT))
 from dotenv import load_dotenv
 load_dotenv()
 
-from backend.config import DATA_ROOT, SQLITE_MEMORY_PATH, KNOWLEDGE_GRAPH_PATH
+from backend.config import DATA_ROOT, SQLITE_MEMORY_PATH, KNOWLEDGE_GRAPH_PATH, DEFAULT_GEMINI_MODEL
 
 from backend.memory.permanent import LongTermMemory
 from backend.memory.recent import SessionArchive
@@ -37,7 +37,7 @@ async def populate_knowledge_graph(
 
     print("\n[1/5] Initializing components...")
 
-    model = GenerativeModelWrapper(client_or_model="gemini-3-pro-preview")
+    model = GenerativeModelWrapper(client_or_model=DEFAULT_GEMINI_MODEL)
     fallback_model = model
     ltm = LongTermMemory()
     session_archive = SessionArchive()
@@ -156,7 +156,7 @@ async def populate_knowledge_graph(
                 else:
                     errors += 1
 
-            except Exception as e:
+            except Exception:
                 errors += 1
 
         total_entities += batch_entities

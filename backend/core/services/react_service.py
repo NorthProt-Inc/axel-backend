@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, AsyncGenerator, Dict, Any, List, Optional
 
-from backend.core.filters import strip_xml_tags, normalize_spacing, has_partial_tool_tag
+from backend.core.filters import strip_xml_tags, has_partial_tool_tag
 from backend.core.logging import get_logger
 from backend.llm import get_llm_client
 from .tool_service import ToolExecutionService
@@ -138,7 +138,7 @@ class ReActLoopService:
                     if function_call:
                         # Flush buffered text before tool call
                         if text_buffer:
-                            filtered_buffer = normalize_spacing(strip_xml_tags(text_buffer))
+                            filtered_buffer = strip_xml_tags(text_buffer)
                             if filtered_buffer:
                                 full_response += filtered_buffer
                                 yield ChatEvent(EventType.TEXT, filtered_buffer)
@@ -156,7 +156,7 @@ class ReActLoopService:
                                 continue
 
                             # Filter and emit
-                            filtered_text = normalize_spacing(strip_xml_tags(text_buffer))
+                            filtered_text = strip_xml_tags(text_buffer)
                             text_buffer = ""
 
                             if filtered_text:
@@ -165,7 +165,7 @@ class ReActLoopService:
 
                 # Flush remaining buffer
                 if text_buffer:
-                    filtered_buffer = normalize_spacing(strip_xml_tags(text_buffer))
+                    filtered_buffer = strip_xml_tags(text_buffer)
                     if filtered_buffer:
                         full_response += filtered_buffer
                         yield ChatEvent(EventType.TEXT, filtered_buffer)
@@ -285,14 +285,14 @@ class ReActLoopService:
                     if has_partial_tool_tag(final_buffer):
                         continue
 
-                    filtered_text = normalize_spacing(strip_xml_tags(final_buffer))
+                    filtered_text = strip_xml_tags(final_buffer)
                     final_buffer = ""
                     if filtered_text:
                         yield ChatEvent(EventType.TEXT, filtered_text)
 
             # Flush remaining
             if final_buffer:
-                filtered_text = normalize_spacing(strip_xml_tags(final_buffer))
+                filtered_text = strip_xml_tags(final_buffer)
                 if filtered_text:
                     yield ChatEvent(EventType.TEXT, filtered_text)
 

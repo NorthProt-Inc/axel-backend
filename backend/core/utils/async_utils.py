@@ -1,6 +1,5 @@
 import asyncio
 from typing import Callable, Any, Optional
-
 from backend.core.logging import get_logger
 
 _logger = get_logger("async_utils")
@@ -30,7 +29,7 @@ async def bounded_to_thread(
 
     try:
 
-        acquired = await asyncio.wait_for(
+        await asyncio.wait_for(
             semaphore.acquire(),
             timeout=5.0
         )

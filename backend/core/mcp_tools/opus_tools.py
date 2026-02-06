@@ -55,12 +55,6 @@ async def delegate_to_opus_tool(arguments: dict[str, Any]) -> Sequence[TextConte
     file_paths = [p.strip() for p in file_paths_raw.split(",") if p.strip()] if file_paths_raw else []
 
     try:
-        from backend.core.tools.opus_executor import _generate_task_summary
-        task_summary = _generate_task_summary(instruction)
-    except ImportError:
-        task_summary = instruction[:50] + "..." if len(instruction) > 50 else instruction
-
-    try:
         from backend.core.tools.opus_executor import delegate_to_opus
 
         result = await delegate_to_opus(

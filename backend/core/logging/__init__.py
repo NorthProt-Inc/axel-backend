@@ -8,7 +8,6 @@ from .logging import (
     reset_request_id,
     get_request_id,
     set_log_level,
-
     MODULE_COLORS,
     MODULE_ABBREV,
     ABBREV,

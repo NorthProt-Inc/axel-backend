@@ -315,7 +315,6 @@ class MCPServer:
                         error={"code": -32602, "message": f"Unknown prompt: {prompt_name}"}
                     )
 
-                prompt = self.prompts[prompt_name]
                 messages = self._generate_prompt_messages(prompt_name, request.params.get("arguments", {}))
                 return MCPResponse(id=request.id, result={"messages": messages})
 

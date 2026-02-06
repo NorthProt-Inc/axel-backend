@@ -4,11 +4,12 @@ Context building service for ChatHandler.
 Assembles context from 4-tier memory system for LLM prompts.
 """
 
+import asyncio
 import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any, List
 
 from backend.core.context_optimizer import ContextOptimizer, get_dynamic_system_prompt
 from backend.core.logging import get_logger, request_tracker as rt
@@ -20,8 +21,6 @@ from backend.config import (
     CONTEXT_WORKING_TURNS,
     CONTEXT_FULL_TURNS,
     CONTEXT_MAX_CHARS,
-    CONTEXT_SESSION_COUNT,
-    CONTEXT_SESSION_BUDGET,
 )
 
 if TYPE_CHECKING:
@@ -35,13 +34,27 @@ _log = get_logger("services.context")
 DEFAULT_CONTEXT_CONFIG = {
     "working_turns": CONTEXT_WORKING_TURNS,
     "full_turns": CONTEXT_FULL_TURNS,
-    "use_sqlite": True,
     "chromadb_limit": 100,
     "use_graphrag": True,
     "max_context_chars": CONTEXT_MAX_CHARS,
-    "session_count": CONTEXT_SESSION_COUNT,
-    "session_budget": CONTEXT_SESSION_BUDGET,
 }
+
+
+def _format_as_bullets(items: List[str], max_items: int = 10) -> str:
+    """Format items as bullet list."""
+    if not items:
+        return ""
+    formatted = []
+    for item in items[:max_items]:
+        item = item.strip()
+        if not item:
+            continue
+        if len(item) > 200:
+            item = item[:197] + "..."
+        formatted.append(f"- {item}")
+    if len(items) > max_items:
+        formatted.append(f"- ... ({len(items) - max_items} more)")
+    return "\n".join(formatted)
 
 
 def _truncate_text(text: str, max_chars: int, label: str = "") -> str:
@@ -168,9 +181,8 @@ class ContextService:
 
         optimizer = ContextOptimizer(tier)
 
-        # Current time and model awareness
+        # Current time
         current_time = datetime.now(self.vancouver_tz).strftime("%Y년 %m월 %d일 (%A) %H:%M PST")
-        model_awareness = f" 현재 모드: {model_config.name} ({tier.upper()} 티어)"
 
         # System prompt from identity
         full_system_prompt = ""
@@ -180,7 +192,7 @@ class ContextService:
         optimizer.add_section("system_prompt", dynamic_prompt)
 
         # Temporal context
-        temporal_content = f"현재 시각: {current_time}\n{model_awareness}"
+        temporal_content = f"현재 시각: {current_time}"
         if self.memory_manager and self.memory_manager.is_working_available():
             time_context = self.memory_manager.get_time_elapsed_context()
             if time_context:
@@ -202,29 +214,19 @@ class ContextService:
         else:
             _log.warning("MEM working unavailable")
 
-        # Session archive context
-        if config["use_sqlite"] and self.memory_manager and self.memory_manager.is_session_archive_available():
-            try:
-                session_count = config.get("session_count", 10)
-                session_budget = config.get("session_budget", 3000)
-                session_context = self.memory_manager.session_archive.get_recent_summaries(
-                    session_count, session_budget
-                )
-                if session_context and "최근 대화 기록이 없습니다" not in session_context:
-                    session_lines = [line.strip() for line in session_context.split('\n') if line.strip()]
-                    session_formatted = optimizer.format_as_bullets(session_lines)
-                    optimizer.add_section("session_archive", session_formatted)
-                    _log.debug("MEM session", chars=len(session_formatted))
-                else:
-                    _log.debug("MEM session empty")
-            except Exception as e:
-                _log.warning("MEM session fail", error=str(e))
+        # Session archive: NOT injected into context automatically.
+        # Available on-demand via MCP tool (get_recent_logs).
+        # Removes duplication with working_memory which already covers current session.
 
-        # Long-term memory context
-        await self._add_longterm_context(optimizer, user_input, config)
-
-        # GraphRAG context
-        await self._add_graphrag_context(optimizer, user_input, config)
+        # Long-term + GraphRAG context (parallel fetch, sequential add)
+        longterm_data, graphrag_data = await asyncio.gather(
+            self._fetch_longterm_data(user_input, config),
+            self._fetch_graphrag_data(user_input, config),
+        )
+        if longterm_data:
+            optimizer.add_section("long_term", longterm_data)
+        if graphrag_data:
+            optimizer.add_section("graphrag", graphrag_data)
 
         # Code context (optional)
         code_summary, code_files_content = await self._build_code_context(
@@ -235,13 +237,13 @@ class ContextService:
         optimized_context = optimizer.build()
         stats = optimizer.get_stats()
 
-        full_prompt = f"##  현재 시간\n{current_time}\n\n"
+        full_prompt = f"## 현재 시간\n{current_time}\n\n"
 
         if optimized_context:
-            full_prompt += f"##  기억 ({tier.upper()} Context)\n{optimized_context}"
+            full_prompt += f"## 기억 ({tier.upper()} Context)\n{optimized_context}"
 
         if code_summary:
-            full_prompt += f"\n\n##  내 코드베이스\n{code_summary}"
+            full_prompt += f"\n\n## 코드베이스\n{code_summary}"
         if code_files_content:
             full_prompt += code_files_content
 
@@ -273,82 +275,102 @@ class ContextService:
             elapsed_ms=context_ms
         )
 
-    async def _add_longterm_context(
+    async def _fetch_longterm_data(
         self,
-        optimizer: ContextOptimizer,
         user_input: str,
-        config: Dict[str, Any]
-    ) -> None:
-        """Add long-term memory context to optimizer."""
+        config: Dict[str, Any],
+    ) -> Optional[str]:
+        """Fetch long-term memory data (non-blocking via to_thread).
+
+        Returns:
+            Formatted memory string, or None if unavailable.
+        """
         if not self.long_term:
-            return
+            return None
 
         try:
             memgpt = getattr(self.memory_manager, 'memgpt', None) if self.memory_manager else None
             if memgpt:
                 token_budget = MEMORY_LONG_TERM_BUDGET
+                limit = config["chromadb_limit"]
 
-                selected_memories, used_tokens = memgpt.context_budget_select(
+                selected_memories, used_tokens = await asyncio.to_thread(
+                    memgpt.context_budget_select,
                     query=user_input,
-                    token_budget=token_budget
+                    token_budget=token_budget,
                 )
-                if selected_memories:
-                    memory_items = []
-                    for m in selected_memories[:config["chromadb_limit"]]:
-                        if not m.content:
-                            continue
-                        ts = (
-                            m.metadata.get('event_timestamp') or
-                            m.metadata.get('created_at') or
-                            m.metadata.get('timestamp', '')
-                        )
-                        age_label = _format_memory_age(ts)
-                        if age_label:
-                            memory_items.append(f"[{age_label}] {m.content}")
-                        else:
-                            memory_items.append(m.content)
+                if not selected_memories:
+                    return None
 
-                    temporal_hint = " 각 기억의 [시간] 라벨을 참고해."
-                    memory_formatted = temporal_hint + "\n" + optimizer.format_as_bullets(memory_items)
-                    optimizer.add_section("long_term", memory_formatted)
-                    _log.debug("MEM longterm", count=len(memory_items), tokens=used_tokens)
+                memory_items: List[str] = []
+                for m in selected_memories[:limit]:
+                    if not m.content:
+                        continue
+                    ts = (
+                        m.metadata.get('event_timestamp') or
+                        m.metadata.get('created_at') or
+                        m.metadata.get('timestamp', '')
+                    )
+                    age_label = _format_memory_age(ts)
+                    if age_label:
+                        memory_items.append(f"[{age_label}] {m.content}")
+                    else:
+                        memory_items.append(m.content)
+
+                if not memory_items:
+                    return None
+
+                memory_formatted = _format_as_bullets(memory_items)
+                _log.debug("MEM longterm", count=len(memory_items), tokens=used_tokens)
+                return memory_formatted
             else:
-                formatted = self.long_term.get_formatted_context(
-                    user_input, max_items=config["chromadb_limit"]
+                formatted = await asyncio.to_thread(
+                    self.long_term.get_formatted_context,
+                    user_input,
+                    max_items=config["chromadb_limit"],
                 )
                 if formatted:
-                    optimizer.add_section("long_term", formatted)
                     _log.debug("MEM longterm fallback", chars=len(formatted))
+                    return formatted
+                return None
         except Exception as e:
             _log.warning("MEM longterm fail", error=str(e))
+            return None
 
-    async def _add_graphrag_context(
+    async def _fetch_graphrag_data(
         self,
-        optimizer: ContextOptimizer,
         user_input: str,
-        config: Dict[str, Any]
-    ) -> None:
-        """Add GraphRAG context to optimizer."""
+        config: Dict[str, Any],
+    ) -> Optional[str]:
+        """Fetch GraphRAG data (non-blocking via to_thread).
+
+        Returns:
+            GraphRAG context string, or None if unavailable.
+        """
         if not config["use_graphrag"]:
-            return
+            return None
 
         if not self.memory_manager or not self.memory_manager.is_graph_rag_available():
-            return
+            return None
 
         try:
-            graph_result = self.memory_manager.graph_rag.query_sync(user_input)
+            graph_result = await asyncio.to_thread(
+                self.memory_manager.graph_rag.query_sync, user_input
+            )
             if graph_result and graph_result.context:
-                optimizer.add_section("graphrag", graph_result.context)
                 _log.debug(
                     "MEM graphrag",
                     entities=len(graph_result.entities),
                     rels=len(graph_result.relations),
-                    chars=len(graph_result.context)
+                    chars=len(graph_result.context),
                 )
+                return graph_result.context
             else:
                 _log.debug("MEM graphrag empty")
+                return None
         except Exception as e:
             _log.warning("MEM graphrag fail", error=str(e))
+            return None
 
     async def _build_code_context(
         self,

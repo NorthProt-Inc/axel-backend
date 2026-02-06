@@ -36,7 +36,6 @@ async def transcribe_audio_endpoint(
 
     _logger.info("REQ recv", path="/transcribe", filename=audio.filename, language=language)
     content = await read_upload_file(audio, MAX_AUDIO_BYTES)
-    filename = audio.filename or "audio.webm"
 
     from backend.media import transcribe_audio as do_transcribe
     result = await do_transcribe(content, language)

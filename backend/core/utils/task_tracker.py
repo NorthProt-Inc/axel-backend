@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
-
 from backend.core.logging import get_logger
 
 _log = get_logger("task_tracker")

@@ -29,10 +29,9 @@ NIGHT_QUERIES = [
 hour = datetime.now().hour
 query = NIGHT_QUERIES[hour % len(NIGHT_QUERIES)]
 
-NIGHT_SHIFT_PROMPT = f"""다음 주제를 조사: {query}
+NIGHT_SHIFT_PROMPT = f"""다음 주제를 조사: {아무거나}
 
-오푸스가 프롬프트 거지같이 써놔서 루트 어드민 이종민이 직접 편집한다. 걍 맘대로 휘집고 놀아ㅋㅋ.
-아 참고로 이거 night_ops.py 후속작임. 구글 딥리서치는 이제 비싸니까 네가 하는걸로 하자고. 알다시피 크론잡이고 난 자는 중이다.
+안녕하신가? 정말 랜덤하게 2026년에 벌어지는 일들을 조사해주쇼. 알다시피 크론잡이고 난 자는 중이다.
 
 [AXEL_SUMMARY_START] 와 [AXEL_SUMMARY_END] 태그 사이에 요약."""
 

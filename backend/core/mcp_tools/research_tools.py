@@ -47,9 +47,9 @@ async def web_search(arguments: dict[str, Any]) -> Sequence[TextContent]:
         return [TextContent(type="text", text="Error: num_results must be between 1 and 10")]
 
     try:
-        from backend.protocols.mcp.research_server import _google_search
+        from backend.protocols.mcp.research.search_engines import web_search
 
-        result = await _google_search(query, num_results)
+        result = await web_search(query, num_results)
         _log.info("TOOL ok", fn="web_search", res_len=len(result))
         return [TextContent(type="text", text=result)]
 
@@ -103,9 +103,9 @@ async def visit_webpage(arguments: dict[str, Any]) -> Sequence[TextContent]:
         return [TextContent(type="text", text="Error: url must start with http:// or https://")]
 
     try:
-        from backend.protocols.mcp.research_server import _visit_page
+        from backend.protocols.mcp.research.page_visitor import visit_page
 
-        result = await _visit_page(url)
+        result = await visit_page(url)
         _log.info("TOOL ok", fn="visit_webpage", res_len=len(result))
         return [TextContent(type="text", text=result)]
 
@@ -142,9 +142,9 @@ async def deep_research(arguments: dict[str, Any]) -> Sequence[TextContent]:
         return [TextContent(type="text", text="Error: query parameter is required")]
 
     try:
-        from backend.protocols.mcp.research_server import _deep_dive
+        from backend.protocols.mcp.research.page_visitor import deep_dive
 
-        result = await _deep_dive(query)
+        result = await deep_dive(query)
         _log.info("TOOL ok", fn="deep_research", res_len=len(result))
         return [TextContent(type="text", text=result)]
 
@@ -193,9 +193,9 @@ async def tavily_search(arguments: dict[str, Any]) -> Sequence[TextContent]:
         return [TextContent(type="text", text="Error: search_depth must be 'basic' or 'advanced'")]
 
     try:
-        from backend.protocols.mcp.research_server import _tavily_search
+        from backend.protocols.mcp.research.search_engines import tavily_search
 
-        result = await _tavily_search(
+        result = await tavily_search(
             query=query,
             max_results=max_results,
             search_depth=search_depth

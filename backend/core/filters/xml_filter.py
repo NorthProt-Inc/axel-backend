@@ -121,35 +121,12 @@ def strip_xml_tags(text: str) -> str:
     cleaned = _TOOL_BLOCK_PATTERN.sub('', text)
 
     # Then remove individual XML tags, keeping the content between them
-    cleaned = _XML_TAG_PATTERN.sub(' ', cleaned)
+    cleaned = _XML_TAG_PATTERN.sub('', cleaned)
 
-    # Clean up excessive whitespace left behind
+    # Clean up excessive blank lines left behind
     cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-    cleaned = re.sub(r'  +', ' ', cleaned)  # collapse multiple spaces
 
     return cleaned.strip()
-
-
-def normalize_spacing(text: str) -> str:
-    """
-    Normalize spacing for Korean-English mixed text.
-
-    Args:
-        text: Text to normalize
-
-    Returns:
-        Text with proper spacing after punctuation
-    """
-    if not text:
-        return text
-
-    # 1. Ensure space after period before Korean/uppercase: ".한" → ". 한"
-    text = re.sub(r'\.([가-힣A-Z])', r'. \1', text)
-
-    # 2. Ensure space after colon before Korean
-    text = re.sub(r':([가-힣])', r': \1', text)
-
-    return text
 
 
 def has_partial_tool_tag(text: str) -> bool:

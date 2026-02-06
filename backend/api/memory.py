@@ -196,46 +196,17 @@ async def get_session_detail(session_id: str):
         return {"error": "Session archive not available"}
 
     try:
-        # 기존 get_session_detail() 메서드 활용
-        detail = state.memory_manager.session_archive.get_session_detail(session_id)
+        archive = state.memory_manager.session_archive
+
+        detail = archive.get_session_detail(session_id)
 
         if not detail:
-            # messages 테이블에서 직접 조회 (get_session_detail이 None인 경우)
-            with state.memory_manager.session_archive._get_connection() as conn:
-                import sqlite3
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT role, content, timestamp FROM messages
-                    WHERE session_id = ? ORDER BY turn_id ASC
-                """, (session_id,))
-                rows = cursor.fetchall()
-
-            messages = [
-                {"role": row[0], "content": row[1], "timestamp": row[2]}
-                for row in rows
-            ]
+            # sessions 테이블에 없는 경우 messages만 반환
+            messages = archive.get_session_messages(session_id)
             return {"session_id": session_id, "messages": messages}
 
-        # 세션 정보와 메시지 함께 반환
         session_info = detail.get("session", {})
         messages = detail.get("messages", [])
-
-        # messages가 비어있으면 messages 테이블에서 조회
-        if not messages:
-            with state.memory_manager.session_archive._get_connection() as conn:
-                import sqlite3
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT role, content, timestamp FROM messages
-                    WHERE session_id = ? ORDER BY turn_id ASC
-                """, (session_id,))
-                rows = cursor.fetchall()
-                messages = [
-                    {"role": row['role'], "content": row['content'], "timestamp": row['timestamp']}
-                    for row in rows
-                ]
 
         return {
             "session_id": session_id,
@@ -274,70 +245,7 @@ async def get_interaction_stats():
         return {"error": "Session archive not available"}
 
     try:
-        with state.memory_manager.session_archive._get_connection() as conn:
-            import sqlite3
-            conn.row_factory = sqlite3.Row
-
-            # 모델별 통계
-            cursor = conn.execute("""
-                SELECT
-                    effective_model,
-                    COUNT(*) as call_count,
-                    AVG(latency_ms) as avg_latency_ms,
-                    SUM(tokens_in) as total_tokens_in,
-                    SUM(tokens_out) as total_tokens_out
-                FROM interaction_logs
-                GROUP BY effective_model
-                ORDER BY call_count DESC
-            """)
-            by_model = [dict(row) for row in cursor.fetchall()]
-
-            # 티어별 통계
-            cursor = conn.execute("""
-                SELECT
-                    tier,
-                    COUNT(*) as call_count,
-                    AVG(latency_ms) as avg_latency_ms,
-                    SUM(tokens_in) as total_tokens_in,
-                    SUM(tokens_out) as total_tokens_out
-                FROM interaction_logs
-                GROUP BY tier
-                ORDER BY call_count DESC
-            """)
-            by_tier = [dict(row) for row in cursor.fetchall()]
-
-            # 라우터 결정 분포
-            cursor = conn.execute("""
-                SELECT
-                    router_reason,
-                    COUNT(*) as count
-                FROM interaction_logs
-                GROUP BY router_reason
-                ORDER BY count DESC
-                LIMIT 10
-            """)
-            by_router_reason = [dict(row) for row in cursor.fetchall()]
-
-            # 최근 24시간 통계
-            cursor = conn.execute("""
-                SELECT
-                    COUNT(*) as total_calls,
-                    AVG(latency_ms) as avg_latency_ms,
-                    SUM(tokens_in) as total_tokens_in,
-                    SUM(tokens_out) as total_tokens_out,
-                    SUM(CASE WHEN refusal_detected = 1 THEN 1 ELSE 0 END) as refusal_count
-                FROM interaction_logs
-                WHERE ts >= datetime('now', '-24 hours')
-            """)
-            last_24h = dict(cursor.fetchone())
-
-            return {
-                "by_model": by_model,
-                "by_tier": by_tier,
-                "by_router_reason": by_router_reason,
-                "last_24h": last_24h
-            }
-
+        return state.memory_manager.session_archive.get_interaction_stats()
     except Exception as e:
         _logger.error("Get interaction stats error", error=str(e))
         return {"error": str(e)}

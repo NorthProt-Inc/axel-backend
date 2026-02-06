@@ -78,9 +78,9 @@ class SearchService:
         start_time = time.perf_counter()
 
         try:
-            from backend.protocols.mcp.research_server import _tavily_search
+            from backend.protocols.mcp.research.search_engines import tavily_search
 
-            search_context = await _tavily_search(
+            search_context = await tavily_search(
                 query,
                 max_results=self.max_results,
                 search_depth=self.search_depth

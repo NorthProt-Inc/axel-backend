@@ -5,8 +5,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-
 from backend.core.logging import get_logger
+from backend.core.security.path_security import PathAccessType, get_path_security
 
 _log = get_logger("tools.system_observer")
 
@@ -137,6 +137,7 @@ def _validate_log_path(log_path: str) -> tuple[bool, Optional[Path], Optional[st
     if log_path.lower() in LOG_FILE_ALIASES:
         log_path = LOG_FILE_ALIASES[log_path.lower()]
 
+    # Bare filename — search in allowed log dirs directly
     if "/" not in log_path and "\\" not in log_path:
         for log_dir in ALLOWED_LOG_DIRS:
             candidate = log_dir / log_path
@@ -144,24 +145,11 @@ def _validate_log_path(log_path: str) -> tuple[bool, Optional[Path], Optional[st
                 return True, candidate, None
         return False, None, f"Log file '{log_path}' not found in allowed directories"
 
-    try:
-        resolved = Path(log_path).resolve()
-
-        if ".." in str(log_path):
-            return False, None, "Path traversal not allowed"
-
-        for allowed_dir in ALLOWED_LOG_DIRS:
-            try:
-                resolved.relative_to(allowed_dir.resolve())
-                if resolved.exists() and resolved.is_file():
-                    return True, resolved, None
-            except ValueError:
-                continue
-
-        return False, None, f"Path '{log_path}' is outside allowed log directories"
-
-    except Exception as e:
-        return False, None, f"Invalid path: {str(e)}"
+    psm = get_path_security()
+    result = psm.validate(log_path, PathAccessType.READ_LOG, must_exist=True, must_be_file=True)
+    if result.valid:
+        return True, result.resolved_path, None
+    return False, None, result.error
 
 def _get_allowed_code_paths() -> List[Path]:
 
@@ -524,7 +512,14 @@ async def search_codebase_regex(
 
 def get_source_code(relative_path: str) -> Optional[str]:
 
-    full_path = AXEL_ROOT / relative_path
+    psm = get_path_security()
+    full_path_str = str(AXEL_ROOT / relative_path)
+    result = psm.validate(full_path_str, PathAccessType.READ_CODE)
+    if not result.valid:
+        return None
+
+    full_path = result.resolved_path
+    assert full_path is not None
 
     path_parts = relative_path.split("/")
     if path_parts:

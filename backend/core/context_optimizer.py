@@ -1,6 +1,13 @@
 from dataclasses import dataclass
 from typing import Dict, List, Literal
 from backend.core.logging import get_logger
+from backend.config import (
+    BUDGET_SYSTEM_PROMPT,
+    BUDGET_TEMPORAL,
+    BUDGET_WORKING_MEMORY,
+    BUDGET_LONG_TERM,
+    BUDGET_GRAPHRAG,
+)
 
 _log = get_logger("core.ctx_opt")
 
@@ -17,43 +24,36 @@ TIER_BUDGETS: Dict[str, Dict[str, SectionBudget]] = {
     "axel": {
         "system_prompt": SectionBudget(
             name="System",
-            max_chars=30_000,
+            max_chars=BUDGET_SYSTEM_PROMPT,
             priority=1,
             overflow_strategy="truncate",
             header_template=""
         ),
         "temporal": SectionBudget(
             name="대화 맥락",
-            max_chars=10_000,
-            priority=2,
+            max_chars=BUDGET_TEMPORAL,
+            priority=1,
             overflow_strategy="truncate",
             header_template="## {name}"
         ),
         "working_memory": SectionBudget(
             name="현재 대화",
-            max_chars=800_000,
-            priority=3,
+            max_chars=BUDGET_WORKING_MEMORY,
+            priority=1,
             overflow_strategy="summarize",
-            header_template="## {name}"
-        ),
-        "session_archive": SectionBudget(
-            name="세션 기록",
-            max_chars=300_000,
-            priority=4,
-            overflow_strategy="truncate",
             header_template="## {name}"
         ),
         "long_term": SectionBudget(
             name="장기 기억",
-            max_chars=500_000,
-            priority=5,
+            max_chars=BUDGET_LONG_TERM,
+            priority=1,
             overflow_strategy="truncate",
             header_template="## {name}"
         ),
         "graphrag": SectionBudget(
             name="관계 기반 지식",
-            max_chars=200_000,
-            priority=6,
+            max_chars=BUDGET_GRAPHRAG,
+            priority=1,
             overflow_strategy="truncate",
             header_template="## {name}"
         ),

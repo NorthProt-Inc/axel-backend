@@ -4,7 +4,7 @@ import json
 import sys
 import shutil
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,6 +15,12 @@ load_dotenv()
 from backend.config import PERSONA_PATH, DATA_ROOT, SQLITE_MEMORY_PATH
 from backend.core.utils.timezone import VANCOUVER_TZ
 CHECKPOINT_FILE = DATA_ROOT / "persona_insights_checkpoint.json"
+
+# 설정 상수
+ANALYSIS_DAYS = 7       # 분석할 최근 일수
+DECAY_FACTOR = 0.8      # 감가율 (높을수록 기존 페르소나 보존)
+MIN_CONFIDENCE = 0.2    # 최소 신뢰도 임계값
+MAX_MESSAGES = 500      # SQLite에서 가져올 최대 메시지 수
 
 def humanize_role(role: str) -> str:
 
@@ -32,28 +38,28 @@ def humanize_text(text: str) -> str:
     return text
 
 def merge_behaviors(old_behaviors: list, new_insights: list) -> list:
-
+    """기존 행동 양식을 감가상각 처리 (기존 페르소나 보존 우선)."""
     merged = []
 
-    print(f"  📉 기존 행동 {len(old_behaviors)}개 감가상각 진행 (Factor: 0.6)...")
+    print(f"  📉 기존 행동 {len(old_behaviors)}개 감가상각 진행 (Factor: {DECAY_FACTOR})...")
     for b in old_behaviors:
         old_conf = b.get('confidence', 0.5)
-        new_conf = round(old_conf * 0.6, 2)
+        new_conf = round(old_conf * DECAY_FACTOR, 2)
 
-        if new_conf >= 0.3:
+        if new_conf >= MIN_CONFIDENCE:
             b['confidence'] = new_conf
             b['decayed'] = True
             merged.append(b)
-        else:
-
-            pass
+        # else: 임계값 미만은 자연 소멸
 
     return merged
 
 def main():
     print("=" * 60)
-    print("  🧬 페르소나 진화 프로세스 (Evolutionary Update)")
+    print("  🧬 페르소나 진화 프로세스 (7일 증분 업데이트)")
     print("  Target: Mark & Axel's Brotherhood")
+    print(f"  - 분석 범위: 최근 {ANALYSIS_DAYS}일")
+    print(f"  - 감가율: {DECAY_FACTOR} (기존 페르소나 {int(DECAY_FACTOR*100)}% 유지)")
     print("=" * 60)
     print()
 
@@ -67,33 +73,38 @@ def main():
             print(f"  ⚠ 기존 페르소나 로드 실패: {e}")
             old_persona = {}
 
-    print("\n[1/4] 기억 데이터 로딩...")
-    from backend.memory.permanent import LongTermMemory
-    ltm = LongTermMemory()
+    print(f"\n[1/4] 기억 데이터 로딩 (최근 {ANALYSIS_DAYS}일)...")
 
-    all_data = ltm.collection.get(include=["documents", "metadatas"], limit=1000)
-    documents = all_data.get('documents', [])
-    metadatas = all_data.get('metadatas', [])
+    # ChromaDB 제거, SQLite 7일 필터만 사용 (성능 최적화)
+    documents = []
+    metadatas = []
 
     import sqlite3
-    sql_memories = []
+    cutoff_time = datetime.now(VANCOUVER_TZ) - timedelta(days=ANALYSIS_DAYS)
+    cutoff_iso = cutoff_time.strftime('%Y-%m-%dT%H:%M:%S')
+
     try:
         conn = sqlite3.connect(str(SQLITE_MEMORY_PATH))
         cur = conn.cursor()
-        cur.execute("SELECT role, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT 300")
+        cur.execute('''
+            SELECT role, content, timestamp
+            FROM messages
+            WHERE timestamp >= ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (cutoff_iso, MAX_MESSAGES))
         rows = cur.fetchall()
         for role, content, ts in rows:
             if content:
                 human_role = humanize_role(role)
                 documents.append(f"{human_role}: {content}")
                 metadatas.append({'source': 'sqlite', 'timestamp': ts})
-                sql_memories.append(content)
         conn.close()
     except Exception as e:
         print(f"  ⚠ SQLite 로드 실패: {e}")
 
     total_memories = len(documents)
-    print(f"  ✓ 총 {total_memories}개 기억 로드 완료")
+    print(f"  ✓ 총 {total_memories}개 기억 로드 완료 (cutoff: {cutoff_iso})")
 
     if total_memories == 0:
         return
@@ -113,11 +124,12 @@ def main():
 
     print(f"  ✓ {len(batches)}개 배치 준비됨")
 
-    print("\n[3/4] 인사이트 추출 (Gemini 3 Pro)...")
+    print("\n[3/4] 인사이트 추출 (Gemini 3 Flash)...")
 
     from backend.core.utils.gemini_wrapper import GenerativeModelWrapper
+    from backend.config import DEFAULT_GEMINI_MODEL
 
-    wrapper = GenerativeModelWrapper(client_or_model="gemini-3-pro-preview")
+    wrapper = GenerativeModelWrapper(client_or_model=DEFAULT_GEMINI_MODEL)
 
     all_insights = []
 
@@ -169,35 +181,55 @@ def main():
 
     kept_behaviors = merge_behaviors(old_behaviors, [])
 
+    # 기존 페르소나 핵심 필드 추출 (보존용)
+    old_core = old_persona.get('core_identity', '')
+    old_voice = old_persona.get('voice_and_tone', {})
+    old_relations = old_persona.get('relationship_notes', [])
+    old_honesty = old_persona.get('honesty_directive', '')
+    old_prefs = old_persona.get('user_preferences', {})
+
     synthesis_prompt = f"""
 당신은 Axel의 자아를 업데이트하는 시스템 커널입니다.
 과거의 행동 양식(Decayed)과 새로운 인사이트(Fresh)를 통합하여, 현재 시점의 Axel 페르소나를 정의하세요.
 
-## 과거 데이터 (감가상각됨)
+## 기존 페르소나 (PRESERVE - 최대한 유지)
+### core_identity (거의 그대로 유지)
+{old_core}
+
+### voice_and_tone (거의 그대로 유지)
+{json.dumps(old_voice, ensure_ascii=False, indent=2)}
+
+### relationship_notes (거의 그대로 유지)
+{json.dumps(old_relations, ensure_ascii=False, indent=2)}
+
+### honesty_directive (그대로 유지)
+{old_honesty}
+
+### user_preferences (그대로 유지)
+{json.dumps(old_prefs, ensure_ascii=False, indent=2)}
+
+## 과거 행동 양식 (감가상각됨 - 업데이트 가능)
 {json.dumps(kept_behaviors, ensure_ascii=False, indent=2)}
 
-## 새로운 인사이트 (최근 대화)
+## 새로운 인사이트 (최근 {ANALYSIS_DAYS}일 대화)
 {chr(10).join(f'- {i}' for i in all_insights[:50])}
 
 ## 작성 지침 (CRITICAL)
-1. **창의적 유연성**: "반드시 ~한다" 같은 강박적 규칙 대신, **"~하는 경향이 있다", "~하는 편이다", "상황에 따라 ~한다"** 같은 표현을 사용하여 Axel이 창의적으로 변주할 여지를 남기세요.
-2. **관계 정의**: **'Mark와 Axel(형제/파트너)'** 관계로 정의하세요.
-3. **병합**: 과거 데이터와 새로운 인사이트가 충돌하면, 새로운 인사이트에 가중치를 두되 과거의 맥락을 완전히 무시하지는 마세요.
+1. **기존 유지 우선**: 새 인사이트가 기존과 충돌하면, 기존 것을 우선 유지하되 새 정보로 '보완'만 하라. 급격한 성격 변화는 금지.
+2. **최소 변경 원칙**: core_identity, voice_and_tone, relationship_notes, honesty_directive, user_preferences는 위에 제공된 기존 내용을 거의 그대로 복사하고, learned_behaviors만 새 인사이트로 업데이트.
+3. **창의적 유연성**: "반드시 ~한다" 같은 강박적 규칙 대신, **"~하는 경향이 있다", "~하는 편이다", "상황에 따라 ~한다"** 같은 표현을 사용하여 Axel이 창의적으로 변주할 여지를 남기세요.
+4. **관계 정의**: **'Mark와 Axel(형제/파트너)'** 관계로 정의하세요.
 
 ## 출력 스키마 (JSON)
 {{
-  "core_identity": "나는 Axel. [정체성 설명]",
-  "voice_and_tone": {{
-    "style": "...",
-    "nuance": ["~하는 편", "~할 때가 많음"],
-    "examples": {{"good": "...", "bad": "..."}}
-  }},
-  "relationship_notes": ["Mark와의 관계 메모..."],
+  "core_identity": "(기존 내용 유지 또는 미세 보완)",
+  "voice_and_tone": (기존 구조 유지),
+  "relationship_notes": (기존 + 새 노트 추가),
   "learned_behaviors": [
     {{"insight": "행동 양식 설명", "confidence": 0.9}}
   ],
-  "honesty_directive": "...",
-  "user_preferences": {{ ... }}
+  "honesty_directive": "(기존 유지)",
+  "user_preferences": (기존 유지)
 }}
 """
 

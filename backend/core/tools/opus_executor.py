@@ -4,6 +4,7 @@ import re
 import subprocess
 import time
 from typing import Any, Dict, List, Optional
+from backend.core.filters import strip_xml_tags
 from backend.core.logging import get_logger
 from backend.core.tools.opus_types import OpusResult, DelegationResult, OpusHealthStatus
 from backend.core.utils.opus_file_validator import (
@@ -19,37 +20,6 @@ from backend.core.utils.opus_file_validator import (
 logger = get_logger("opus-executor")
 
 DEFAULT_MODEL = "opus"
-
-# Regex pattern to strip XML-style tags from LLM output
-_XML_TAG_PATTERN = re.compile(
-    r'</?(?:'
-    r'attempt_completion|result|thought|thinking|reflection|'
-    r'call:[^>]+|function_call|tool_call|tool_result|tool_use|'
-    r'antthinking|search_quality_reflection|search_quality_score|'
-    r'invoke|parameters|arguments|input|output|name|value'
-    r')[^>]*>',
-    re.IGNORECASE | re.DOTALL
-)
-
-# Pattern to detect complete tool call blocks
-_TOOL_BLOCK_PATTERN = re.compile(
-    r'<(?:function_call|tool_call|tool_use|invoke)[^>]*>.*?</(?:function_call|tool_call|tool_use|invoke)>',
-    re.IGNORECASE | re.DOTALL
-)
-
-def _strip_xml_tags(text: str) -> str:
-    """Strip XML-style control tags from LLM output, preserving content."""
-    if not text:
-        return text
-    # First, remove complete tool call blocks entirely
-    cleaned = _TOOL_BLOCK_PATTERN.sub('', text)
-    # Then remove individual XML tags, keeping the content between them
-    cleaned = _XML_TAG_PATTERN.sub('', cleaned)
-    # Clean up excessive whitespace left behind
-    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
-    cleaned = re.sub(r'  +', ' ', cleaned)
-    return cleaned.strip()
-
 COMMAND_TIMEOUT = 600
 
 def _build_context_block(file_paths: List[str]) -> tuple[str, List[str], List[str]]:
@@ -308,7 +278,7 @@ async def delegate_to_opus(
             if context_errors:
                 response_parts.append(f"Warnings: {'; '.join(context_errors)}")
             # Strip XML tags from output before returning
-            cleaned_output = _strip_xml_tags(result.output)
+            cleaned_output = strip_xml_tags(result.output)
             response_parts.append(cleaned_output)
 
             return DelegationResult(
@@ -319,7 +289,7 @@ async def delegate_to_opus(
             )
         else:
             # Strip XML tags from error output as well
-            cleaned_output = _strip_xml_tags(result.output) if result.output else ""
+            cleaned_output = strip_xml_tags(result.output) if result.output else ""
             return DelegationResult(
                 success=False,
                 response=cleaned_output,

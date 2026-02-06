@@ -15,8 +15,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional, TYPE_CHECKING
-
-from backend.core.filters import strip_xml_tags, normalize_spacing
+from backend.core.filters import strip_xml_tags
 from backend.core.logging import get_logger, request_tracker as rt
 from backend.core.services import (
     ContextService,
@@ -32,7 +31,9 @@ from backend.core.services.react_service import (
     ChatEvent,
     EventType,
 )
+from backend.core.services.emotion_service import classify_emotion
 from backend.llm.router import DEFAULT_MODEL
+from backend.config import CHAT_THINKING_LEVEL
 
 if TYPE_CHECKING:
     from backend.api.deps import ChatStateProtocol
@@ -61,13 +62,6 @@ class ChatRequest:
 
 
 @dataclass
-class QueryMode:
-    """Query mode configuration."""
-    name: str = "chat"
-    icon: str = "💬"
-
-
-DEFAULT_MODE = QueryMode()
 
 
 class ChatHandler:
@@ -188,49 +182,85 @@ class ChatHandler:
         _log.debug("MODEL select", model=model_config.name, tier=tier, provider=model_config.provider)
         yield ChatEvent(EventType.STATUS, f"{model_config.icon} {model_config.name} 연결 중...")
 
-        # 1. Add user message to memory
+        # Phase 1: Add user message immediately (neutral emotion placeholder)
         if self.state.memory_manager:
-            self.state.memory_manager.add_message("user", user_input)
+            self.state.memory_manager.add_message("user", user_input, emotional_context="neutral")
 
-        # 2. Build context
-        context_result = await self.context_service.build(
-            user_input=user_input,
-            tier=tier,
-            model_config=model_config,
-            classification=classification
+        # Phase 2: Run independent tasks in parallel
+        gather_results = await asyncio.gather(
+            classify_emotion(user_input),
+            self.context_service.build(
+                user_input=user_input,
+                tier=tier,
+                model_config=model_config,
+                classification=classification,
+            ),
+            self.search_service.search_if_needed(
+                user_input,
+                request.enable_search or classification.needs_search,
+            ),
+            self._fetch_tools(),
+            return_exceptions=True,
         )
 
-        # 3. Web search (if needed)
-        search_result = await self.search_service.search_if_needed(
-            user_input,
-            request.enable_search or classification.needs_search
+        # Unpack with fallbacks for individual failures
+        raw_emotion, raw_context, raw_search, raw_tools = gather_results
+
+        from backend.core.services.context_service import ContextResult
+
+        user_emotion: str = raw_emotion if isinstance(raw_emotion, str) else "neutral"
+        if isinstance(raw_emotion, BaseException):
+            _log.warning("PARALLEL emotion fail", error=str(raw_emotion))
+
+        context_result: ContextResult = (
+            raw_context if isinstance(raw_context, ContextResult)
+            else ContextResult(system_prompt="", stats={}, turn_count=0, elapsed_ms=0.0)
         )
+        if isinstance(raw_context, BaseException):
+            _log.warning("PARALLEL context fail", error=str(raw_context))
+
+        from backend.core.services.search_service import SearchResult
+        search_result: SearchResult = (
+            raw_search if isinstance(raw_search, SearchResult)
+            else SearchResult()
+        )
+        if isinstance(raw_search, BaseException):
+            _log.warning("PARALLEL search fail", error=str(raw_search))
+
+        mcp_client, available_tools = (
+            raw_tools if isinstance(raw_tools, tuple) else (None, [])
+        )
+        if isinstance(raw_tools, BaseException):
+            _log.warning("PARALLEL tools fail", error=str(raw_tools))
+
+        # Phase 3: Patch emotion on already-added message
+        if user_emotion != "neutral" and self.state.memory_manager:
+            working = getattr(self.state.memory_manager, 'working', None)
+            if working and hasattr(working, '_messages') and working._messages:
+                working._messages[-1].emotional_context = user_emotion
+
         if search_result.success:
             yield ChatEvent(EventType.STATUS, " 검색 완료")
 
-        # 4. Build final prompt
+        # Build final prompt
         final_prompt = self._build_final_prompt(
             user_input=user_input,
             search_context=search_result.context,
-            search_failed=search_result.failed
+            search_failed=search_result.failed,
         )
 
-        yield ChatEvent(EventType.STATUS, f"{DEFAULT_MODE.icon} 응답 생성 중...")
-
-        # 5. Get MCP tools
-        yield ChatEvent(EventType.STATUS, "🔧 도구 준비 중...")
-        from backend.core.mcp_client import get_mcp_client
-        mcp_client = get_mcp_client()
+        yield ChatEvent(EventType.STATUS, "응답 생성 중...")
 
         # Update tool service with MCP client
-        self.tool_service.mcp_client = mcp_client
-        available_tools = await mcp_client.get_gemini_tools()
+        if mcp_client:
+            self.tool_service.mcp_client = mcp_client
 
         # 6. ReAct loop configuration
         react_config = ReActConfig(
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             enable_thinking=request.enable_thinking,
+            thinking_level=CHAT_THINKING_LEVEL,
         )
 
         # Special case: force tool call for specific keywords
@@ -239,7 +269,6 @@ class ChatHandler:
         # 7. Run ReAct loop
         full_response = ""
         llm_elapsed = 0.0
-        loop_count = 0
 
         async for event in self.react_service.run(
             prompt=final_prompt,
@@ -256,12 +285,11 @@ class ChatHandler:
                 result: ReActResult = event.metadata["react_result"]
                 full_response = result.full_response
                 llm_elapsed = result.llm_elapsed_ms
-                loop_count = result.loops_completed
             else:
                 yield event
 
-        # 8. Post-process: clean response and persist
-        full_response = normalize_spacing(strip_xml_tags(full_response))
+        # 8. Safety net: strip any leaked XML tags (react_service handles most filtering)
+        full_response = strip_xml_tags(full_response)
 
         # Add assistant message to memory and spawn persistence task
         if full_response:
@@ -303,6 +331,17 @@ class ChatHandler:
             }
         )
 
+    async def _fetch_tools(self) -> tuple:
+        """Fetch MCP client and available tools.
+
+        Returns:
+            Tuple of (mcp_client, available_tools).
+        """
+        from backend.core.mcp_client import get_mcp_client
+        mcp_client = get_mcp_client()
+        available_tools = await mcp_client.get_gemini_tools()
+        return mcp_client, available_tools
+
     def _build_final_prompt(
         self,
         user_input: str,
@@ -310,12 +349,12 @@ class ChatHandler:
         search_failed: bool
     ) -> str:
         """Build the final user prompt with search results."""
-        parts = [f"## {DEFAULT_MODE.icon} {DEFAULT_MODE.name.upper()}"]
+        parts = []
 
         if search_context:
             parts.append(f"## 검색 결과\n{search_context}")
         elif search_failed:
-            parts.append(" 검색 실패")
+            parts.append("검색 실패")
 
         parts.append(f"[User]: {user_input}")
         return "\n".join(parts)

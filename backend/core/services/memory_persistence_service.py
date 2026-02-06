@@ -8,6 +8,7 @@ import asyncio
 from typing import TYPE_CHECKING, Optional, Dict, Any
 
 from backend.core.logging import get_logger
+from backend.core.services.emotion_service import classify_emotion_sync
 from backend.memory import calculate_importance_sync
 
 if TYPE_CHECKING:
@@ -164,4 +165,5 @@ class MemoryPersistenceService:
     def add_assistant_message(self, response: str) -> None:
         """Add assistant message to working memory."""
         if response and self.memory_manager:
-            self.memory_manager.add_message("assistant", response)
+            emotion = classify_emotion_sync(response)
+            self.memory_manager.add_message("assistant", response, emotional_context=emotion)

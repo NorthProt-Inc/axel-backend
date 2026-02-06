@@ -249,19 +249,12 @@ class SmartFormatter(logging.Formatter):
         if len(module_display) > 14:
             module_display = module_display[:13] + "…"
 
-        req_part = ""
         elapsed_part = ""
-
-        req_id = get_request_id()
-        if req_id:
-            req_part = f"{c_dim}{req_id[:8]}{c_reset}"
 
         try:
             from .request_tracker import get_tracker
             tracker = get_tracker()
             if tracker:
-                if not req_id:
-                    req_part = f"{c_dim}{tracker.request_id[:8]}{c_reset}"
                 ms = tracker.elapsed_ms()
                 if ms >= 1000:
                     elapsed_part = f" {c_dim}+{ms/1000:.1f}s{c_reset}"

@@ -572,13 +572,13 @@ python scripts/regenerate_persona.py
 | db_maintenance.py | SQLite DB 최적화 (VACUUM, 통계) | `python scripts/db_maintenance.py` |
 | cleanup_messages.py | 오래된 메시지 정리 (LLM 품질 판단) | `python scripts/cleanup_messages.py [--dry-run] [--limit N]` |
 | run_migrations.py | DB 스키마 마이그레이션 | `python scripts/run_migrations.py` |
-| axel_chat.py | ~~터미널 채팅 (deprecated)~~ → `axel-chat` 사용 | `axel-chat` |
+| *(삭제됨)* | 터미널 채팅 → `axel-chat` (Rust CLI) | `axel-chat` |
 | cron_memory_gc.sh | 메모리 GC cron 래퍼 | `./scripts/cron_memory_gc.sh` |
 | cron_audio_cleanup.sh | 오디오/로그 캐시 정리 | `./scripts/cron_audio_cleanup.sh` |
 
 ### axel-chat 사용법 (Rust CLI)
 
-> `scripts/axel_chat.py`는 deprecated. Rust 기반 `axel-chat`을 사용하세요.
+> Rust 기반 CLI. 소스: `~/projects/axel-chat`
 
 ```bash
 # REPL 모드 (대화형)

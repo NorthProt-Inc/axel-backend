@@ -572,25 +572,31 @@ python scripts/regenerate_persona.py
 | db_maintenance.py | SQLite DB 최적화 (VACUUM, 통계) | `python scripts/db_maintenance.py` |
 | cleanup_messages.py | 오래된 메시지 정리 (LLM 품질 판단) | `python scripts/cleanup_messages.py [--dry-run] [--limit N]` |
 | run_migrations.py | DB 스키마 마이그레이션 | `python scripts/run_migrations.py` |
-| axel_chat.py | 터미널 채팅 인터페이스 (TUI) | `python scripts/axel_chat.py` |
+| axel_chat.py | ~~터미널 채팅 (deprecated)~~ → `axel-chat` 사용 | `axel-chat` |
 | cron_memory_gc.sh | 메모리 GC cron 래퍼 | `./scripts/cron_memory_gc.sh` |
 | cron_audio_cleanup.sh | 오디오/로그 캐시 정리 | `./scripts/cron_audio_cleanup.sh` |
 
-### axel_chat.py 사용법
+### axel-chat 사용법 (Rust CLI)
 
-터미널에서 직접 Axel과 대화할 수 있는 TUI 인터페이스:
+> `scripts/axel_chat.py`는 deprecated. Rust 기반 `axel-chat`을 사용하세요.
 
 ```bash
-cd /home/northprot/projects/axnmihn
-source ~/projects-env/bin/activate
-python scripts/axel_chat.py
+# REPL 모드 (대화형)
+axel-chat
+
+# 단일 쿼리
+axel-chat -e "안녕"
+
+# 모델 목록 확인
+axel-chat :models
 ```
 
 **주요 기능:**
-- 실시간 스트리밍 응답
-- 대화 히스토리 유지
-- 멀티라인 입력 지원 (`\` 줄 끝에 추가)
-- `/exit` 또는 Ctrl+C로 종료
+- 실시간 SSE 스트리밍
+- 멀티라인 입력, 히스토리 검색 (Ctrl+R)
+- Tab 자동완성
+- 세션 관리, 롤 시스템, RAG
+- Config: `~/.config/axel_chat/config.yaml`
 
 ### API 테스트
 
@@ -1103,6 +1109,25 @@ pkill -f python
 
 # 4. 재시작 (user service - sudo 불필요)
 systemctl --user restart axnmihn-backend
+```
+
+### start-limit-hit (재시작 제한 초과)
+
+> 짧은 시간 내 반복 실패 시 systemd가 추가 시작을 차단함
+> 현재 설정: **1분 이내 5회 실패 시 차단** (`StartLimitIntervalSec=60`, `StartLimitBurst=5`)
+
+```bash
+# 1. 상태 확인 — "start-limit-hit" 메시지가 보이는지 확인
+systemctl --user status axnmihn-backend
+
+# 2. 실패 카운터 초기화
+systemctl --user reset-failed axnmihn-backend
+
+# 3. 서비스 시작
+systemctl --user start axnmihn-backend
+
+# 4. 헬스체크
+curl -sf http://localhost:8000/health
 ```
 
 ### 포트 충돌 (Address already in use)

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """
+[DEPRECATED] This script is deprecated in favor of axel-chat (Rust CLI).
+Install: https://github.com/NorthProt-Inc/axel-chat
+Usage: axel-chat
+
 Axel CLI Chat — 터미널에서 Axel과 대화하는 인터페이스
 Usage: python3 scripts/axel_chat.py [--url URL] [--key KEY]
 """

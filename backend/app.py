@@ -23,6 +23,11 @@ from backend.config import (
     DATABASE_URL,
     PG_POOL_MIN,
     PG_POOL_MAX,
+    DISCORD_BOT_TOKEN,
+    DISCORD_ALLOWED_CHANNELS,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_ALLOWED_USERS,
+    TELEGRAM_ALLOWED_CHATS,
 )
 from backend.memory import MemoryManager
 from backend.llm import get_all_providers
@@ -192,6 +197,59 @@ async def lifespan(app: FastAPI):
     if ltm:
         consolidation_task = asyncio.create_task(_periodic_consolidation())
 
+    # Channel adapters (Discord / Telegram)
+    channel_mgr = None
+    if DISCORD_BOT_TOKEN or TELEGRAM_BOT_TOKEN:
+        from backend.channels.manager import ChannelManager
+        from backend.core.chat_handler import ChatHandler
+
+        channel_mgr = ChannelManager()
+        chat_handler = ChatHandler(state=state)
+
+        if DISCORD_BOT_TOKEN:
+            from backend.channels.discord.bot import DiscordAdapter
+
+            dc_channels = (
+                [int(c) for c in DISCORD_ALLOWED_CHANNELS.split(",") if c.strip()]
+                if DISCORD_ALLOWED_CHANNELS
+                else None
+            )
+            channel_mgr.register(
+                DiscordAdapter(
+                    token=DISCORD_BOT_TOKEN,
+                    handler=chat_handler,
+                    allowed_channel_ids=dc_channels,
+                )
+            )
+
+        if TELEGRAM_BOT_TOKEN:
+            from backend.channels.telegram.bot import TelegramAdapter
+
+            tg_users = (
+                [u.strip() for u in TELEGRAM_ALLOWED_USERS.split(",") if u.strip()]
+                if TELEGRAM_ALLOWED_USERS
+                else None
+            )
+            tg_chats = (
+                [int(c) for c in TELEGRAM_ALLOWED_CHATS.split(",") if c.strip()]
+                if TELEGRAM_ALLOWED_CHATS
+                else None
+            )
+            channel_mgr.register(
+                TelegramAdapter(
+                    token=TELEGRAM_BOT_TOKEN,
+                    handler=chat_handler,
+                    allowed_usernames=tg_users,
+                    allowed_chat_ids=tg_chats,
+                )
+            )
+
+        try:
+            await channel_mgr.start_all()
+            _log.info("APP channels started", platforms=[p.value for p in channel_mgr.registered_platforms])
+        except Exception as e:
+            _log.warning("APP channel start failed", error=str(e))
+
     yield
 
     # Cancel consolidation task
@@ -201,6 +259,14 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(consolidation_task, timeout=1.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
+
+    # Stop channel adapters
+    if channel_mgr and channel_mgr.is_running:
+        try:
+            await channel_mgr.stop_all()
+            _log.info("APP channels stopped")
+        except Exception as e:
+            _log.warning("APP channel stop failed", error=str(e))
 
     _log.info("APP shutdown", reason="lifespan_end")
 
@@ -227,16 +293,17 @@ async def lifespan(app: FastAPI):
             _log.info("APP working memory persisted", turns=state.memory_manager.working.get_turn_count())
 
         try:
+            session_timeout = SHUTDOWN_SESSION_TIMEOUT + 10.0
             await asyncio.wait_for(
                 state.memory_manager.end_session(
                     allow_llm_summary=True,
                     allow_fallback_summary=True,
-                    summary_timeout_seconds=30.0,
+                    summary_timeout_seconds=session_timeout - 2.0,
                 ),
-                timeout=SHUTDOWN_SESSION_TIMEOUT + 10.0,
+                timeout=session_timeout,
             )
         except Exception as e:
-            _log.warning("APP session save failed", error=str(e))
+            _log.warning("APP session save failed", error=str(e) or type(e).__name__)
 
     if state.long_term_memory:
         try:

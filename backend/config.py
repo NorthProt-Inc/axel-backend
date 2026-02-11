@@ -319,9 +319,9 @@ REACT_DEFAULT_MAX_TOKENS = _get_int_env("REACT_DEFAULT_MAX_TOKENS", 16384)
 # =============================================================================
 # Shutdown Timeouts
 # =============================================================================
-SHUTDOWN_TASK_TIMEOUT = _get_float_env("SHUTDOWN_TASK_TIMEOUT", 3.0)
-SHUTDOWN_SESSION_TIMEOUT = _get_float_env("SHUTDOWN_SESSION_TIMEOUT", 3.0)
-SHUTDOWN_HTTP_POOL_TIMEOUT = _get_float_env("SHUTDOWN_HTTP_POOL_TIMEOUT", 2.0)
+SHUTDOWN_TASK_TIMEOUT = _get_float_env("SHUTDOWN_TASK_TIMEOUT", 10.0)
+SHUTDOWN_SESSION_TIMEOUT = _get_float_env("SHUTDOWN_SESSION_TIMEOUT", 30.0)
+SHUTDOWN_HTTP_POOL_TIMEOUT = _get_float_env("SHUTDOWN_HTTP_POOL_TIMEOUT", 5.0)
 
 # =============================================================================
 # TTS Configuration
@@ -331,3 +331,12 @@ TTS_FFMPEG_TIMEOUT = _get_float_env("TTS_FFMPEG_TIMEOUT", 10.0)
 TTS_QUEUE_MAX_PENDING = _get_int_env("TTS_QUEUE_MAX_PENDING", 3)
 TTS_IDLE_TIMEOUT = _get_int_env("TTS_IDLE_TIMEOUT", 300)
 TTS_SERVICE_URL = os.getenv("TTS_SERVICE_URL", "")
+
+# =============================================================================
+# Channel Adapters (Discord / Telegram)
+# =============================================================================
+DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
+DISCORD_ALLOWED_CHANNELS = os.getenv("DISCORD_ALLOWED_CHANNELS", "")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_ALLOWED_USERS = os.getenv("TELEGRAM_ALLOWED_USERS", "")
+TELEGRAM_ALLOWED_CHATS = os.getenv("TELEGRAM_ALLOWED_CHATS", "")

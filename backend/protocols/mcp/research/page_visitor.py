@@ -80,6 +80,8 @@ async def visit_page(url: str) -> str:
         dur_ms = int((time.time() - start_time) * 1000)
         _log.warning("Page visit timeout, extracting partial content", url=url[:80], dur_ms=dur_ms)
         try:
+            if page is None:
+                raise RuntimeError("Page not initialized")
             html = await page.content()
             title = await page.title()
             markdown = html_to_markdown(html, url)
@@ -122,8 +124,11 @@ async def deep_dive(query: str) -> str:
     start_time = time.time()
     _log.info("Deep dive starting", query=query[:80])
 
-    output = f"# Deep Dive Research: {query}\n\n"
-    output += "## Phase 1: Search Results\n\n"
+    # PERF-043: Use list accumulation instead of string concatenation
+    output_parts = [
+        f"# Deep Dive Research: {query}\n\n",
+        "## Phase 1: Search Results\n\n"
+    ]
 
     results = await search_duckduckgo(query, num_results=5)
 
@@ -131,9 +136,9 @@ async def deep_dive(query: str) -> str:
         return f"Deep dive failed: No search results for '{query}'"
 
     for i, r in enumerate(results, 1):
-        output += f"{i}. **{r['title']}**\n   {r['url']}\n\n"
+        output_parts.append(f"{i}. **{r['title']}**\n   {r['url']}\n\n")
 
-    output += "---\n\n## Phase 2: Content Extraction\n\n"
+    output_parts.append("---\n\n## Phase 2: Content Extraction\n\n")
 
     visited_content: list[dict] = []
     urls_to_visit = [r["url"] for r in results[:3]]
@@ -144,16 +149,16 @@ async def deep_dive(query: str) -> str:
     artifact_paths: list[str] = []
 
     for i, (url, content) in enumerate(zip(urls_to_visit, page_contents), 1):
-        output += f"### Source {i}: {url}\n\n"
+        output_parts.append(f"### Source {i}: {url}\n\n")
 
-        if isinstance(content, Exception):
-            output += f"*Failed to retrieve: {str(content)}*\n\n"
+        if isinstance(content, BaseException):
+            output_parts.append(f"*Failed to retrieve: {str(content)}*\n\n")
         else:
             is_artifact = content.strip().startswith("[ARTIFACT SAVED]")
 
             if is_artifact:
                 visited_content.append({"url": url, "content": content, "is_artifact": True})
-                output += f"{content}\n\n"
+                output_parts.append(f"{content}\n\n")
 
                 path_match = re.search(r"Path: ([^\n]+)", content)
                 if path_match:
@@ -164,33 +169,33 @@ async def deep_dive(query: str) -> str:
 
                 if content_body.strip():
                     visited_content.append({"url": url, "content": content_body, "is_artifact": False})
-                    output += f"{content_body}\n\n"
+                    output_parts.append(f"{content_body}\n\n")
                 else:
-                    output += "*No meaningful content extracted*\n\n"
+                    output_parts.append("*No meaningful content extracted*\n\n")
 
-        output += "---\n\n"
+        output_parts.append("---\n\n")
 
-    output += "## Phase 3: Research Summary\n\n"
-    output += f"**Query:** {query}\n"
-    output += f"**Sources Analyzed:** {len(visited_content)}/{len(urls_to_visit)}\n"
+    output_parts.append("## Phase 3: Research Summary\n\n")
+    output_parts.append(f"**Query:** {query}\n")
+    output_parts.append(f"**Sources Analyzed:** {len(visited_content)}/{len(urls_to_visit)}\n")
 
     total_chars = sum(
         len(c["content"]) if not c.get("is_artifact") else ARTIFACT_THRESHOLD
         for c in visited_content
     )
-    output += f"**Total Content Length:** {total_chars:,} characters\n\n"
+    output_parts.append(f"**Total Content Length:** {total_chars:,} characters\n\n")
 
     if visited_content:
-        output += "**Key Sources:**\n"
+        output_parts.append("**Key Sources:**\n")
         for vc in visited_content:
             artifact_marker = " (artifact)" if vc.get("is_artifact") else ""
-            output += f"- {vc['url']}{artifact_marker}\n"
+            output_parts.append(f"- {vc['url']}{artifact_marker}\n")
 
     if artifact_paths:
-        output += "\n**Saved Artifacts:**\n"
+        output_parts.append("\n**Saved Artifacts:**\n")
         for path in artifact_paths:
-            output += f"- `{path}`\n"
-        output += "\n_Use `read_artifact` tool to retrieve full content from saved artifacts._\n"
+            output_parts.append(f"- `{path}`\n")
+        output_parts.append("\n_Use `read_artifact` tool to retrieve full content from saved artifacts._\n")
 
     dur_ms = int((time.time() - start_time) * 1000)
     _log.info(
@@ -200,4 +205,5 @@ async def deep_dive(query: str) -> str:
         sources=len(visited_content),
         artifacts=len(artifact_paths),
     )
-    return output
+
+    return "".join(output_parts)

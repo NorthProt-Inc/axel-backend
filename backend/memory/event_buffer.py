@@ -65,7 +65,12 @@ class EventBuffer:
         """Get most recent N events."""
         if n <= 0:
             return []
-        return list(self._buffer)[-n:]
+        # PERF-039: Direct slice without full list conversion
+        buf_len = len(self._buffer)
+        if n >= buf_len:
+            return list(self._buffer)
+        # Use negative indexing on deque for last N items
+        return [self._buffer[i] for i in range(buf_len - n, buf_len)]
 
     def get_by_type(self, event_type: EventType, limit: int = 10) -> List[StreamEvent]:
         """Get recent events of specific type."""

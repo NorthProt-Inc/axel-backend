@@ -3,6 +3,7 @@
 import re
 import time
 import uuid
+from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Any, Set
 
 from backend.core.logging import get_logger
@@ -16,6 +17,11 @@ from .decay_calculator import AdaptiveDecayCalculator
 from .consolidator import MemoryConsolidator
 
 _log = get_logger("memory.permanent")
+
+
+def _text_similarity(a: str, b: str) -> float:
+    """Fast text similarity score (0-1)."""
+    return SequenceMatcher(None, a.lower()[:500], b.lower()[:500]).ratio()
 
 
 class PromotionCriteria:
@@ -66,26 +72,40 @@ class LongTermMemory:
 
     def __init__(
         self,
-        db_path: str = None,
-        embedding_model: str = None,
+        db_path: Optional[str] = None,
+        embedding_model: Optional[str] = None,
+        repository=None,
     ):
         """Initialize long-term memory.
 
         Args:
             db_path: Path to ChromaDB storage
             embedding_model: Model name for embeddings
+            repository: Optional pre-built repository (e.g. PgMemoryRepository).
+                        If provided, db_path is ignored.
         """
         self.db_path = db_path or str(CHROMADB_PATH)
         self.embedding_model = embedding_model or MemoryConfig.EMBEDDING_MODEL
 
         # Initialize components
-        self._repository = ChromaDBRepository(db_path=self.db_path)
+        if repository is not None:
+            self._repository = repository
+        else:
+            self._repository = ChromaDBRepository(db_path=self.db_path)
         self._init_embedding_service()
         self._decay_calculator = AdaptiveDecayCalculator()
         self._consolidator = MemoryConsolidator(
             repository=self._repository,
             decay_calculator=self._decay_calculator,
         )
+
+        # Compile regex for particle removal (PERF-019)
+        particles = [
+            "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "로", "으로",
+            "에서", "까지", "부터", "도", "만", "뿐", "이다", "입니다", "이에요", "예요", "임", "임.",
+            "'s", "is", "the", "a", "an",
+        ]
+        self._particle_pattern = re.compile("|".join(re.escape(p) for p in particles))
 
         # Repetition cache
         self._repetition_cache: Dict[str, int] = {}
@@ -132,8 +152,8 @@ class LongTermMemory:
     # =========================================================================
     def get_all_memories(
         self,
-        include: List[str] = None,
-        limit: int = None,
+        include: Optional[List[str]] = None,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Get all memories from storage.
 
@@ -163,7 +183,10 @@ class LongTermMemory:
         threshold: float = 0.8,
         n_results: int = 5,
     ) -> List[Dict[str, Any]]:
-        """Find memories similar to given content.
+        """Find memories similar to given content using hybrid scoring.
+
+        Combines vector similarity (70%) with text similarity (30%)
+        for more accurate matching.
 
         Args:
             content: Content to compare
@@ -181,12 +204,24 @@ class LongTermMemory:
 
         results = self._repository.query_by_embedding(
             embedding=embedding,
-            n_results=n_results,
+            n_results=n_results * 2,  # Fetch extra for re-ranking
             include=["documents", "metadatas", "distances"],
         )
 
+        # Hybrid scoring: 0.7 * vector + 0.3 * text
+        for m in results:
+            vector_score = m.get("similarity", 0)
+            try:
+                text_score = _text_similarity(content, m.get("content", ""))
+            except Exception:
+                text_score = 0.0
+            m["similarity"] = 0.7 * vector_score + 0.3 * text_score
+
+        # Re-sort by hybrid score
+        results.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+
         # Filter by threshold
-        return [m for m in results if m.get("similarity", 0) >= threshold]
+        return [m for m in results if m.get("similarity", 0) >= threshold][:n_results]
 
     def get_embedding_for_text(
         self,
@@ -232,40 +267,8 @@ class LongTermMemory:
         """Generate normalized content key for deduplication."""
         text = content.lower().strip()
 
-        # Remove common particles
-        particles = [
-            "은",
-            "는",
-            "이",
-            "가",
-            "을",
-            "를",
-            "의",
-            "에",
-            "와",
-            "과",
-            "로",
-            "으로",
-            "에서",
-            "까지",
-            "부터",
-            "도",
-            "만",
-            "뿐",
-            "이다",
-            "입니다",
-            "이에요",
-            "예요",
-            "임",
-            "임.",
-            "'s",
-            "is",
-            "the",
-            "a",
-            "an",
-        ]
-        for p in particles:
-            text = text.replace(p, "")
+        # Remove common particles using single regex (PERF-019)
+        text = self._particle_pattern.sub("", text)
 
         text = re.sub(r"[^\w\s가-힣]", "", text)
         text = re.sub(r"\s+", " ", text).strip()
@@ -277,8 +280,8 @@ class LongTermMemory:
         content: str,
         memory_type: str,
         importance: float = 0.5,
-        source_session: str = None,
-        event_timestamp: str = None,
+        source_session: Optional[str] = None,
+        event_timestamp: Optional[str] = None,
         force: bool = False,
     ) -> Optional[str]:
         """Add memory to long-term storage.
@@ -310,14 +313,7 @@ class LongTermMemory:
             _log.debug("Memory rejected", reason=reason, preview=content[:50])
             return None
 
-        # Check for existing similar memory
-        existing = self._find_similar(content, threshold=MemoryConfig.DUPLICATE_THRESHOLD)
-        if existing:
-            self._update_repetitions(existing["id"], repetitions)
-            _log.debug("Updated existing memory", id=existing["id"])
-            return existing["id"]
-
-        # Generate embedding
+        # Generate embedding once for both dedup search and storage (PERF-005)
         embedding = self._embedding_service.get_embedding(content)
         if not embedding:
             _log.error(
@@ -326,6 +322,17 @@ class LongTermMemory:
                 importance=importance,
             )
             return None
+
+        # Check for existing similar memory using pre-computed embedding
+        existing = self._find_similar(
+            content,
+            threshold=MemoryConfig.DUPLICATE_THRESHOLD,
+            embedding=embedding,
+        )
+        if existing:
+            self._update_repetitions(existing["id"], repetitions)
+            _log.debug("Updated existing memory", id=existing["id"])
+            return existing["id"]
 
         # Create metadata
         doc_id = str(uuid.uuid4())
@@ -336,7 +343,7 @@ class LongTermMemory:
             "importance": importance,
             "repetitions": repetitions,
             "promotion_reason": reason,
-            "source_session": source_session or "unknown",
+            "source_session": source_session or None,
             "content_hash": content_key,
             "created_at": now,
             "event_timestamp": event_timestamp or now,
@@ -362,11 +369,24 @@ class LongTermMemory:
             )
             return None
 
-    def _find_similar(self, content: str, threshold: float = 0.8) -> Optional[Dict]:
-        """Find similar existing memory."""
-        embedding = self._embedding_service.get_embedding(
-            content, task_type="retrieval_query"
-        )
+    def _find_similar(
+        self,
+        content: str,
+        threshold: float = 0.8,
+        embedding: Optional[List[float]] = None,
+    ) -> Optional[Dict]:
+        """Find similar existing memory.
+
+        Args:
+            content: Content text to search for.
+            threshold: Minimum similarity threshold (0-1).
+            embedding: Pre-computed embedding to reuse. If None, a new
+                embedding is generated with task_type ``retrieval_query``.
+        """
+        if embedding is None:
+            embedding = self._embedding_service.get_embedding(
+                content, task_type="retrieval_query"
+            )
         if not embedding:
             return None
 
@@ -409,8 +429,8 @@ class LongTermMemory:
         self,
         query_text: str,
         n_results: int = 5,
-        memory_type: str = None,
-        temporal_filter: dict = None,
+        memory_type: Optional[str] = None,
+        temporal_filter: Optional[dict] = None,
     ) -> List[Dict[str, Any]]:
         """Query memories by semantic similarity.
 
@@ -431,7 +451,7 @@ class LongTermMemory:
 
         try:
             # Build filter
-            where_clauses = []
+            where_clauses: list[Dict[str, Any]] = []
 
             if memory_type:
                 where_clauses.append({"type": memory_type})
@@ -559,24 +579,17 @@ class LongTermMemory:
         self._last_flush_time = time.time()
 
         now = now_vancouver().isoformat()
-        updated = 0
-        failed_ids = []
 
-        for doc_id in ids_to_update:
-            try:
-                self._repository.update_metadata(doc_id, {"last_accessed": now})
-                updated += 1
-            except Exception as e:
-                failed_ids.append(doc_id)
-                _log.debug("Access update failed", doc_id=doc_id[:8], error=str(e))
+        # Batch update (PERF-019)
+        metadatas = [{"last_accessed": now} for _ in ids_to_update]
+        updated = self._repository.batch_update_metadata(ids_to_update, metadatas)
 
-        if failed_ids:
+        if updated < len(ids_to_update):
             _log.warning(
                 "Some access updates failed",
-                failed_count=len(failed_ids),
+                failed_count=len(ids_to_update) - updated,
                 total=len(ids_to_update),
             )
-            self._pending_access_updates.update(failed_ids)
 
         if updated > 0:
             _log.debug("MEM flush", count=updated)
@@ -630,13 +643,8 @@ class LongTermMemory:
         """
         try:
             count = self.count()
-            results = self._repository.get_all(include=["metadatas"])
-
-            type_counts = {}
-            for m in results.get("metadatas", []):
-                if m:
-                    t = m.get("type", "unknown")
-                    type_counts[t] = type_counts.get(t, 0) + 1
+            # Use optimized type counts query (PERF-020)
+            type_counts = self._repository.get_type_counts()
 
             return {
                 "total_memories": count,

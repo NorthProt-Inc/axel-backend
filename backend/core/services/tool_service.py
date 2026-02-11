@@ -115,6 +115,7 @@ class ToolExecutionService:
     ) -> Tuple[ToolResult, str]:
         """Execute a single tool call and return (ToolResult, output_line)."""
         try:
+            assert self.mcp_client is not None
             result = await self.mcp_client.call_tool(tool_name, tool_args)
             success = result.get("success", False)
             output_text = result.get("result", "")
@@ -140,8 +141,10 @@ class ToolExecutionService:
             _log.warning("No MCP client for deferred tools")
             return
 
-        for tool_name, tool_args in tools:
+        async def _run_one(tool_name: str, tool_args: Dict[str, Any]) -> None:
             try:
+                if self.mcp_client is None:
+                    return
                 result = await self.mcp_client.call_tool(tool_name, tool_args)
                 success = result.get("success", False)
                 if success:
@@ -154,6 +157,8 @@ class ToolExecutionService:
                     )
             except Exception as e:
                 _log.warning("BG TOOL error", name=tool_name, error=str(e)[:100])
+
+        await asyncio.gather(*(_run_one(tn, ta) for tn, ta in tools))
 
     def spawn_deferred_task(
         self,

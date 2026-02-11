@@ -1,5 +1,7 @@
 """Embedding generation service with caching."""
 
+import asyncio
+import hashlib
 import time
 from typing import Dict, List, Optional
 
@@ -7,6 +9,7 @@ from google import genai
 
 from backend.config import EMBEDDING_MAX_RETRIES
 from backend.core.logging import get_logger
+from backend.core.resilience.circuit_breaker import CircuitBreaker
 from .config import MemoryConfig
 
 _log = get_logger("memory.embedding")
@@ -45,6 +48,7 @@ class EmbeddingService:
         self.embedding_model = embedding_model or MemoryConfig.EMBEDDING_MODEL
         self._cache_size = cache_size or MemoryConfig.EMBEDDING_CACHE_SIZE
         self._cache: Dict[str, List[float]] = {}
+        self._breaker = CircuitBreaker("embedding", failure_threshold=3, cooldown_sec=30.0)
 
     def get_embedding(
         self,
@@ -58,16 +62,22 @@ class EmbeddingService:
             task_type: Embedding task type (retrieval_document, retrieval_query)
 
         Returns:
-            768-dimensional embedding vector or None on failure
+            3072-dimensional embedding vector or None on failure
         """
         if not self.client:
             _log.warning("GenAI client not available for embedding")
             return None
 
-        # Cache key includes task type
-        cache_key = f"{hash(text[:500])}:{task_type}"
+        if not self._breaker.allow_request():
+            _log.warning("Embedding circuit open, returning None")
+            return None
+
+        # PERF-027: Use deterministic hash for cache key
+        cache_key = f"{hashlib.sha256(text[:500].encode()).hexdigest()[:16]}:{task_type}"
 
         if cache_key in self._cache:
+            # PERF-027: True LRU - move accessed key to end
+            self._cache[cache_key] = self._cache.pop(cache_key)
             _log.debug("MEM embed cache_hit")
             return self._cache[cache_key]
 
@@ -78,16 +88,20 @@ class EmbeddingService:
             result = self.client.models.embed_content(
                 model=self.embedding_model,
                 contents=text,
-                config={"task_type": task_type},
+                config={"task_type": task_type, "output_dimensionality": 3072},
             )
+            if result.embeddings is None:
+                return None
             embedding = result.embeddings[0].values
 
             # Cache with LRU eviction
-            self._cache_with_eviction(cache_key, embedding)
+            self._cache_with_eviction(cache_key, embedding)  # type: ignore[arg-type]
+            self._breaker.record_success()
 
             return embedding
 
         except Exception as e:
+            self._breaker.record_failure()
             _log.error(
                 "Embedding generation failed",
                 error=str(e),
@@ -98,7 +112,7 @@ class EmbeddingService:
             return None
 
     def _wait_for_rate_limit(self) -> None:
-        """Wait for rate limiter token with retries."""
+        """Wait for rate limiter token with retries (blocking version)."""
         try:
             limiter = get_embedding_limiter()
             for attempt in range(EMBEDDING_MAX_RETRIES):
@@ -107,7 +121,25 @@ class EmbeddingService:
 
                 if attempt < EMBEDDING_MAX_RETRIES - 1:
                     _log.debug("Rate limit: waiting for token", attempt=attempt + 1)
+                    # PERF-027: Note - still blocking sleep, but async version available
                     time.sleep(0.5)
+                else:
+                    _log.warning("Rate limit: proceeding without token after retries")
+
+        except ImportError:
+            pass  # Rate limiter not available
+
+    async def _wait_for_rate_limit_async(self) -> None:
+        """Wait for rate limiter token with retries (async version for PERF-027)."""
+        try:
+            limiter = get_embedding_limiter()
+            for attempt in range(EMBEDDING_MAX_RETRIES):
+                if limiter.try_acquire():
+                    break
+
+                if attempt < EMBEDDING_MAX_RETRIES - 1:
+                    _log.debug("Rate limit: waiting for token", attempt=attempt + 1)
+                    await asyncio.sleep(0.5)
                 else:
                     _log.warning("Rate limit: proceeding without token after retries")
 

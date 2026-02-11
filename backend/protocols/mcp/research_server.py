@@ -14,7 +14,9 @@ import time
 from pathlib import Path
 
 AXEL_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(AXEL_ROOT))
+# PERF-041: Check before inserting to avoid duplicates
+if str(AXEL_ROOT) not in sys.path:
+    sys.path.insert(0, str(AXEL_ROOT))
 
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -40,14 +42,11 @@ _log = get_logger("protocols.research")
 
 research_server = Server("research-mcp")
 
-
-@research_server.list_tools()
-async def list_tools() -> list[Tool]:
-
-    return [
-        Tool(
-            name="google_search",
-            description="""Search the web using DuckDuckGo. Returns titles, URLs, and snippets.
+# PERF-041: Define tool schemas at module level to avoid rebuilding on every list_tools call
+_RESEARCH_TOOLS = [
+    Tool(
+        name="google_search",
+        description="""Search the web using DuckDuckGo. Returns titles, URLs, and snippets.
 
 Use this for:
 - Quick fact-checking
@@ -55,27 +54,27 @@ Use this for:
 - Getting URLs to visit for deeper research
 
 Note: For deep research, use 'deep_dive' instead which combines search + page visits.""",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query (be specific for better results)"
-                    },
-                    "num_results": {
-                        "type": "integer",
-                        "description": "Number of results to return (default: 5, max: 10)",
-                        "default": 5,
-                        "minimum": 1,
-                        "maximum": 10
-                    }
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query (be specific for better results)"
                 },
-                "required": ["query"]
-            }
-        ),
-        Tool(
-            name="visit_page",
-            description="""Visit a URL with a headless browser and extract content as Markdown.
+                "num_results": {
+                    "type": "integer",
+                    "description": "Number of results to return (default: 5, max: 10)",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 10
+                }
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
+        name="visit_page",
+        description="""Visit a URL with a headless browser and extract content as Markdown.
 
 CAPABILITIES:
 - Renders JavaScript (handles dynamic/SPA sites)
@@ -93,20 +92,20 @@ IDEAL FOR:
 LIMITATIONS:
 - May be blocked by aggressive anti-bot protections
 - Large pages are truncated to ~50K chars""",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "Full URL to visit (must start with http:// or https://)"
-                    }
-                },
-                "required": ["url"]
-            }
-        ),
-        Tool(
-            name="deep_dive",
-            description="""Comprehensive research tool: Search -> Visit top pages -> Compile findings.
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Full URL to visit (must start with http:// or https://)"
+                }
+            },
+            "required": ["url"]
+        }
+    ),
+    Tool(
+        name="deep_dive",
+        description="""Comprehensive research tool: Search -> Visit top pages -> Compile findings.
 
 This is your PRIMARY research tool. It:
 1. Searches the web for your query
@@ -124,20 +123,20 @@ OUTPUT INCLUDES:
 - Search results overview
 - Full content from top 3 sources
 - Research summary with key sources""",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Research query - be specific and detailed for best results"
-                    }
-                },
-                "required": ["query"]
-            }
-        ),
-        Tool(
-            name="tavily_search",
-            description=""" FAST search using Tavily API with AI-generated summary.
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Research query - be specific and detailed for best results"
+                }
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
+        name="tavily_search",
+        description=""" FAST search using Tavily API with AI-generated summary.
 
 BEST FOR:
 - Quick fact-checking (fastest option)
@@ -152,33 +151,33 @@ FEATURES:
 REQUIRES: TAVILY_API_KEY (will error if not set)
 
 Use 'search_depth=advanced' for more thorough results (slower).""",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query"
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Number of results (default: 5)",
-                        "default": 5,
-                        "minimum": 1,
-                        "maximum": 10
-                    },
-                    "search_depth": {
-                        "type": "string",
-                        "enum": ["basic", "advanced"],
-                        "description": "basic=fast, advanced=thorough",
-                        "default": "basic"
-                    }
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query"
                 },
-                "required": ["query"]
-            }
-        ),
-        Tool(
-            name="read_artifact",
-            description="""Read the full content of a saved research artifact.
+                "max_results": {
+                    "type": "integer",
+                    "description": "Number of results (default: 5)",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 10
+                },
+                "search_depth": {
+                    "type": "string",
+                    "enum": ["basic", "advanced"],
+                    "description": "basic=fast, advanced=thorough",
+                    "default": "basic"
+                }
+            },
+            "required": ["query"]
+        }
+    ),
+    Tool(
+        name="read_artifact",
+        description="""Read the full content of a saved research artifact.
 
 When deep_dive or visit_page saves large content (>2000 chars) as an artifact,
 only a summary is returned. Use this tool to retrieve the complete content.
@@ -189,37 +188,43 @@ WHEN TO USE:
 - When the summary isn't enough to answer the user's question
 
 The artifact path is provided in the research output.""",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the artifact file (from the research output)"
-                    }
-                },
-                "required": ["path"]
-            }
-        ),
-        Tool(
-            name="list_artifacts",
-            description="""List recently saved research artifacts.
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the artifact file (from the research output)"
+                }
+            },
+            "required": ["path"]
+        }
+    ),
+    Tool(
+        name="list_artifacts",
+        description="""List recently saved research artifacts.
 
 Shows saved artifacts with their URLs, timestamps, and file sizes.
 Use this to find artifacts from previous research sessions.""",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of artifacts to list (default: 20)",
-                        "default": 20,
-                        "minimum": 1,
-                        "maximum": 100
-                    }
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of artifacts to list (default: 20)",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 100
                 }
             }
-        ),
-    ]
+        }
+    ),
+]
+
+
+@research_server.list_tools()
+async def list_tools() -> list[Tool]:
+    """Return pre-defined tool schemas."""
+    return _RESEARCH_TOOLS
 
 
 @research_server.call_tool()

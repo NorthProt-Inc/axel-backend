@@ -23,9 +23,9 @@ from backend.core.utils.lazy import Lazy as _Lazy
 class BrowserManager:
     """Manages a single Playwright browser instance with auto-restart and idle cleanup."""
 
-    _lock: asyncio.Lock = asyncio.Lock()
-
     def __init__(self) -> None:
+        # PERF-043: Create lock in __init__ instead of class definition time
+        self._lock: asyncio.Lock = asyncio.Lock()
         self._playwright = None
         self._browser = None
         self._context = None

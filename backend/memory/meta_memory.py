@@ -7,7 +7,7 @@ Tracks query-memory access patterns for:
 """
 
 import json
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Set
 
@@ -20,18 +20,21 @@ _log = get_logger("memory.meta")
 class MetaMemory:
     """Track query-memory access patterns for hot memory detection and channel diversity."""
 
-    def __init__(self, conn_mgr=None):
+    def __init__(self, conn_mgr=None, pg_repository=None):
         """Initialize MetaMemory.
 
         Args:
             conn_mgr: Optional SQLiteConnectionManager for persistence.
                       If None, operates in memory-only mode.
+            pg_repository: Optional PgMetaMemoryRepository. When provided,
+                          PostgreSQL is used for persistence.
         """
         self._conn_mgr = conn_mgr
-        # In-memory tracking (persisted to SQLite periodically)
+        self._pg = pg_repository
+        # In-memory tracking (write-behind cache)
         self._memory_access: Counter = Counter()  # memory_id -> access_count
         self._memory_channels: defaultdict[str, Set[str]] = defaultdict(set)  # memory_id -> {channel_ids}
-        self._patterns: List[Dict[str, Any]] = []
+        self._patterns: deque = deque(maxlen=10000)  # PERF-039: Bounded deque instead of unbounded list
 
     def record_access(
         self,
@@ -61,7 +64,9 @@ class MetaMemory:
         }
         self._patterns.append(pattern)
 
-        if self._conn_mgr:
+        if self._pg:
+            self._pg.persist_pattern(pattern)
+        elif self._conn_mgr:
             self._persist_pattern(pattern)
 
         _log.info(
@@ -109,6 +114,9 @@ class MetaMemory:
         Returns:
             Number of patterns pruned
         """
+        if self._pg:
+            return self._pg.prune_old_patterns(older_than_days)
+
         if not self._conn_mgr:
             return 0
 

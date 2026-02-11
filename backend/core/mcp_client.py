@@ -22,8 +22,8 @@ MCP_RETRY_CONFIG = RetryConfig(
     },
 )
 
-CORE_TOOLS = [
-
+# PERF-040: Use frozenset for O(1) membership checks
+CORE_TOOLS = frozenset([
     "run_command",
     "read_file",
     "list_directory",
@@ -37,21 +37,34 @@ CORE_TOOLS = [
     "web_search",
     "visit_webpage",
     "deep_research",
-]
+])
 MAX_TOOLS = MCP_MAX_TOOLS
 
 class MCPClient:
 
     TOOLS_CACHE_TTL = 300
 
-    def __init__(self, base_url: str = None):
+    def __init__(self, base_url: Optional[str] = None):
         self.base_url = base_url or MCP_SERVER_URL
         self._gemini_tools_cache: Optional[List[dict]] = None
         self._cache_timestamp: float = 0
         self._anthropic_tools_cache: Optional[List[dict]] = None
         self._anthropic_cache_timestamp: float = 0
+        self._session: Optional[aiohttp.ClientSession] = None
 
-    async def call_tool(self, name: str, arguments: Dict[str, Any] = None) -> Dict[str, Any]:
+    def _get_session(self) -> aiohttp.ClientSession:
+        """Return persistent aiohttp session, creating lazily on first use."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self) -> None:
+        """Close the persistent HTTP session."""
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+            self._session = None
+
+    async def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute an MCP tool with retry logic and fallback mechanisms.
 
         Uses retry_async for transient errors (connection, timeout, etc.).
@@ -86,7 +99,7 @@ class MCPClient:
                 "error": f"Tool call failed after {MCP_RETRY_CONFIG.max_retries} retries: {str(e)}",
             }
 
-    async def call_tool_http(self, name: str, arguments: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def call_tool_http(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute an MCP tool via HTTP fallback.
 
         Args:
@@ -99,22 +112,22 @@ class MCPClient:
         arguments = arguments or {}
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/mcp/execute",
-                    json={
-                        "id": 1,
-                        "method": "tools/call",
-                        "params": {"name": name, "arguments": arguments}
-                    },
-                    headers={"Content-Type": "application/json"}
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return {"success": True, "result": data.get("result")}
-                    else:
-                        error = await resp.text()
-                        return {"success": False, "error": f"HTTP {resp.status}: {error}"}
+            session = self._get_session()
+            async with session.post(
+                f"{self.base_url}/mcp/execute",
+                json={
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": name, "arguments": arguments}
+                },
+                headers={"Content-Type": "application/json"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {"success": True, "result": data.get("result")}
+                else:
+                    error = await resp.text()
+                    return {"success": False, "error": f"HTTP {resp.status}: {error}"}
         except Exception as e:
             _log.error("MCP HTTP call failed", tool=name, error=str(e))
             return {"success": False, "error": str(e)}
@@ -154,7 +167,7 @@ class MCPClient:
             _log.error("MCP get_tools_with_schemas failed", error=str(e))
             return []
 
-    async def get_gemini_tools(self, force_refresh: bool = False, max_tools: int = None) -> list:
+    async def get_gemini_tools(self, force_refresh: bool = False, max_tools: Optional[int] = None) -> list:
         """Get MCP tools formatted for Gemini function calling.
 
         Converts tool schemas to Gemini-compatible format with caching.

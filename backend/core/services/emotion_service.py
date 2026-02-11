@@ -1,6 +1,5 @@
 """Lightweight emotion classification using Gemini Flash."""
 
-import asyncio
 from typing import Literal
 
 from google.genai import types
@@ -51,7 +50,7 @@ def classify_emotion_sync(text: str) -> EmotionLabel:
         label = raw.strip().lower()
         if label in _VALID_LABELS:
             _log.debug("emotion_classified", label=label, text_len=len(text))
-            return label
+            return label  # type: ignore[return-value]
 
         if label:
             _log.warning("emotion_unexpected_label", raw=label)
@@ -86,7 +85,7 @@ async def classify_emotion(text: str) -> EmotionLabel:
         label = raw.strip().lower()
         if label in _VALID_LABELS:
             _log.debug("emotion_classified", label=label, text_len=len(text))
-            return label
+            return label  # type: ignore[return-value]
 
         if label:
             _log.warning("emotion_unexpected_label", raw=label)

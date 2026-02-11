@@ -82,7 +82,7 @@ class TestCosineSimilarityBatch:
 
     def test_typical_embedding_dimension(self):
         """Test with typical embedding dimensions (768, 1024, 1536)."""
-        for dim in [768, 1024, 1536]:
+        for dim in [768, 1024, 1536, 3072]:
             query = np.random.randn(dim).astype(np.float64)
             corpus = np.random.randn(50, dim).astype(np.float64)
 

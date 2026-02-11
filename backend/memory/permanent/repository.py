@@ -19,9 +19,9 @@ class ChromaDBRepository:
 
     def __init__(
         self,
-        db_path: str = None,
+        db_path: Optional[str] = None,
         collection_name: str = "axnmihn_memory",
-        client: chromadb.ClientAPI = None,
+        client: Optional[chromadb.ClientAPI] = None,
     ):
         """Initialize repository.
 
@@ -52,7 +52,7 @@ class ChromaDBRepository:
         content: str,
         embedding: List[float],
         metadata: Dict[str, Any],
-        doc_id: str = None,
+        doc_id: Optional[str] = None,
     ) -> str:
         """Add a memory to storage.
 
@@ -70,7 +70,7 @@ class ChromaDBRepository:
         try:
             self._collection.add(
                 documents=[content],
-                embeddings=[embedding],
+                embeddings=[embedding],  # type: ignore[arg-type]
                 metadatas=[metadata],
                 ids=[doc_id],
             )
@@ -88,8 +88,8 @@ class ChromaDBRepository:
 
     def get_all(
         self,
-        include: List[str] = None,
-        limit: int = None,
+        include: Optional[List[str]] = None,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Get all memories from storage.
 
@@ -104,8 +104,8 @@ class ChromaDBRepository:
 
         try:
             if limit:
-                return self._collection.get(include=include, limit=limit)
-            return self._collection.get(include=include)
+                return dict(self._collection.get(include=include, limit=limit))  # type: ignore[arg-type]
+            return dict(self._collection.get(include=include))  # type: ignore[arg-type]
 
         except Exception as e:
             _log.error("Get all failed", error=str(e))
@@ -142,8 +142,8 @@ class ChromaDBRepository:
         self,
         embedding: List[float],
         n_results: int,
-        where: Dict[str, Any] = None,
-        include: List[str] = None,
+        where: Optional[Dict[str, Any]] = None,
+        include: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Query memories by embedding similarity.
 
@@ -160,31 +160,36 @@ class ChromaDBRepository:
 
         try:
             results = self._collection.query(
-                query_embeddings=[embedding],
+                query_embeddings=[embedding],  # type: ignore[arg-type]
                 n_results=n_results,
                 where=where,
-                include=include,
+                include=include,  # type: ignore[arg-type]
             )
 
             memories = []
-            if results["ids"] and results["ids"][0]:
-                for i, doc_id in enumerate(results["ids"][0]):
-                    memory = {
+            ids = results.get("ids")
+            documents = results.get("documents")
+            metadatas = results.get("metadatas")
+            distances = results.get("distances")
+
+            if ids and ids[0]:
+                for i, doc_id in enumerate(ids[0]):
+                    memory: Dict[str, Any] = {
                         "id": doc_id,
                         "content": (
-                            results["documents"][0][i]
-                            if results.get("documents") and results["documents"][0]
+                            documents[0][i]
+                            if documents and documents[0]
                             else ""
                         ),
                         "metadata": (
-                            results["metadatas"][0][i]
-                            if results.get("metadatas") and results["metadatas"][0]
+                            metadatas[0][i]
+                            if metadatas and metadatas[0]
                             else {}
                         ),
                     }
 
-                    if results.get("distances") and results["distances"][0]:
-                        distance = results["distances"][0][i]
+                    if distances and distances[0]:
+                        distance = distances[0][i]
                         memory["distance"] = distance
                         memory["similarity"] = 1 - distance
 
@@ -217,6 +222,31 @@ class ChromaDBRepository:
             _log.error("Update failed", error=str(e), doc_id=doc_id)
             return False
 
+    def batch_update_metadata(self, doc_ids: List[str], metadatas: List[Dict[str, Any]]) -> int:
+        """Batch update metadata for multiple documents.
+
+        Args:
+            doc_ids: List of document IDs
+            metadatas: List of metadata dicts (one per doc_id)
+
+        Returns:
+            Number of successfully updated documents
+        """
+        if not doc_ids or not metadatas or len(doc_ids) != len(metadatas):
+            return 0
+
+        try:
+            self._collection.update(
+                ids=doc_ids,
+                metadatas=metadatas,  # type: ignore[arg-type]
+            )
+            _log.debug("Batch metadata update", count=len(doc_ids))
+            return len(doc_ids)
+
+        except Exception as e:
+            _log.error("Batch update failed", error=str(e), count=len(doc_ids))
+            return 0
+
     def update_document(
         self,
         doc_id: str,
@@ -237,7 +267,7 @@ class ChromaDBRepository:
             self._collection.update(
                 ids=[doc_id],
                 documents=[document],
-                embeddings=[embedding],
+                embeddings=[embedding],  # type: ignore[arg-type]
             )
             _log.debug("Document updated", id=doc_id[:8])
             return True
@@ -283,3 +313,21 @@ class ChromaDBRepository:
         except Exception as e:
             _log.error("Count failed", error=str(e))
             return 0
+
+    def get_type_counts(self) -> Dict[str, int]:
+        """Get count of memories by type.
+
+        Returns:
+            Dictionary mapping memory type to count
+        """
+        try:
+            results = self._collection.get(include=["metadatas"])
+            type_counts: Dict[str, int] = {}
+            for m in (results.get("metadatas") or []):
+                if m:
+                    t = str(m.get("type", "unknown"))
+                    type_counts[t] = type_counts.get(t, 0) + 1
+            return type_counts
+        except Exception as e:
+            _log.error("Type counts failed", error=str(e))
+            return {}

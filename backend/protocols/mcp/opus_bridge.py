@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Sequence
 
 _AXEL_ROOT_TEMP = Path(__file__).parent.parent.parent.parent.resolve()
-sys.path.insert(0, str(_AXEL_ROOT_TEMP))
+# PERF-041: Check before inserting to avoid duplicates
+if str(_AXEL_ROOT_TEMP) not in sys.path:
+    sys.path.insert(0, str(_AXEL_ROOT_TEMP))
 
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -138,15 +140,15 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
 
         elif name == "opus_health_check":
             try:
-                result = await asyncio.to_thread(
+                proc_result = await asyncio.to_thread(
                     subprocess.run,
                     ["claude", "--version"],
                     capture_output=True,
                     timeout=10,
                 )
 
-                if result.returncode == 0:
-                    version = safe_decode(result.stdout).strip()
+                if proc_result.returncode == 0:
+                    version = safe_decode(proc_result.stdout).strip()
                     return [
                         TextContent(
                             type="text",
@@ -154,7 +156,7 @@ async def call_tool(name: str, arguments: dict) -> Sequence[types.TextContent]:
                         )
                     ]
                 else:
-                    stderr = safe_decode(result.stderr)
+                    stderr = safe_decode(proc_result.stderr)
                     return [TextContent(type="text", text=f"Error: {stderr}")]
 
             except FileNotFoundError:

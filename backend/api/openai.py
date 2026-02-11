@@ -224,7 +224,7 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
     stream_id = uuid.uuid4().hex[:8]
 
     state = get_state()
-    state.active_streams.append(stream_id)
+    state.active_streams.add(stream_id)
     _logger.debug("stream started", stream_id=stream_id, active_count=len(state.active_streams))
 
     thinking_buffer: list[str] = []
@@ -329,19 +329,23 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
 
     finally:
 
-        if stream_id in state.active_streams:
-            state.active_streams.remove(stream_id)
+        state.active_streams.discard(stream_id)
         _logger.debug("stream ended", stream_id=stream_id, active_count=len(state.active_streams))
 
 async def _non_stream_openai_response(handler: ChatHandler, request: HandlerRequest) -> dict:
 
-    full_response = ""
+    response_parts: list[str] = []
+    is_error = False
 
     async for event in handler.process(request):
         if event.type == EventType.TEXT:
-            full_response += event.content
+            response_parts.append(event.content)
         elif event.type == EventType.ERROR:
-            full_response = f"Error: {event.content}"
+            response_parts.clear()
+            response_parts.append(f"Error: {event.content}")
+            is_error = True
+
+    full_response = "".join(response_parts)
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",

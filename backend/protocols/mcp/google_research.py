@@ -5,7 +5,9 @@ import time
 from pathlib import Path
 
 AXEL_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(AXEL_ROOT))
+# PERF-041: Check before inserting to avoid duplicates
+if str(AXEL_ROOT) not in sys.path:
+    sys.path.insert(0, str(AXEL_ROOT))
 
 from dotenv import load_dotenv
 load_dotenv(AXEL_ROOT / ".env")
@@ -67,7 +69,7 @@ async def google_deep_research(query: str, depth: int = 3) -> str:
             _log.debug("Poll status", status=interaction.status, elapsed_s=int(elapsed))
 
             if interaction.status == "completed":
-                for output in interaction.outputs:
+                for output in (interaction.outputs or []):
                     if hasattr(output, 'text') and output.text:
                         dur_ms = int((time.time() - total_start) * 1000)
                         _log.info("RES complete", tool="google_deep_research", dur_ms=dur_ms, chars=len(output.text))

@@ -85,7 +85,7 @@ async def _analyze_findings(
         config = types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(
                 include_thoughts=True,
-                thinking_level=DEFAULT_THINKING_LEVEL,
+                thinking_level=DEFAULT_THINKING_LEVEL,  # type: ignore[arg-type]
             ),
         )
         response = await gemini_generate(
@@ -95,14 +95,14 @@ async def _analyze_findings(
         )
 
         analysis = response.text if hasattr(response, 'text') else str(response)
-        _log.info("Intern analysis completed", query=query[:50], analysis_len=len(analysis))
-        return analysis
+        _log.info("Intern analysis completed", query=query[:50], analysis_len=len(analysis or ""))
+        return analysis or ""
 
     except Exception as e:
         _log.error("Intern analysis failed", error=str(e), query=query[:50])
         return f"## Analysis Failed\n\nError: {str(e)}\n\nRaw report saved for manual review."
 
-def _save_report(
+async def _save_report(
     query: str,
     raw_report: str,
     analysis: str,
@@ -155,12 +155,12 @@ status: completed
 </details>
 """
 
-    filepath.write_text(report_content, encoding="utf-8")
+    await asyncio.to_thread(filepath.write_text, report_content, encoding="utf-8")
     _log.info("Report saved", path=str(filepath), chars=len(report_content))
 
     return filepath
 
-def _append_to_research_log(
+async def _append_to_research_log(
     query: str,
     source: str,
     report_path: Optional[Path],
@@ -177,10 +177,16 @@ def _append_to_research_log(
         success: Whether research succeeded
     """
     try:
+        import asyncio
 
+        # Initialize log file if it doesn't exist
         if not RESEARCH_LOG_PATH.exists():
             RESEARCH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            RESEARCH_LOG_PATH.write_text("# Research Log\n\n", encoding="utf-8")
+            await asyncio.to_thread(
+                RESEARCH_LOG_PATH.write_text,
+                "# Research Log\n\n| Timestamp | Status | Source | Query | Report | Time |\n|-----------|--------|--------|-------|--------|------|\n",
+                encoding="utf-8"
+            )
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         status = "✅" if success else "❌"
@@ -195,16 +201,12 @@ def _append_to_research_log(
 
         entry = f"| {timestamp} | {status} | {source} | {query[:40]}... | `{relative_path}` | {execution_time:.1f}s |\n"
 
-        content = RESEARCH_LOG_PATH.read_text(encoding="utf-8")
-        if "| Timestamp |" not in content:
+        # Append entry asynchronously
+        def _append():
+            with RESEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
+                f.write(entry)
 
-            header = "\n| Timestamp | Status | Source | Query | Report | Time |\n"
-            header += "|-----------|--------|--------|-------|--------|------|\n"
-            content += header
-            RESEARCH_LOG_PATH.write_text(content, encoding="utf-8")
-
-        with RESEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(entry)
+        await asyncio.to_thread(_append)
 
         _log.debug("Research log updated", query=query[:30])
 
@@ -249,7 +251,7 @@ async def _run_research_pipeline(
                 task_id=task_id,
                 error=raw_report[:200]
             )
-            _append_to_research_log(query, source, None, execution_time, False)
+            await _append_to_research_log(query, source, None, execution_time, False)
             return
 
         _log.info(
@@ -261,7 +263,7 @@ async def _run_research_pipeline(
 
         analysis = await _analyze_findings(query, raw_report, source)
 
-        report_path = _save_report(
+        report_path = await _save_report(
             query=query,
             raw_report=raw_report,
             analysis=analysis,
@@ -269,7 +271,7 @@ async def _run_research_pipeline(
             execution_time=execution_time
         )
 
-        _append_to_research_log(query, source, report_path, execution_time, True)
+        await _append_to_research_log(query, source, report_path, execution_time, True)
 
         total_time = time.time() - start_time
         _log.info(
@@ -289,7 +291,7 @@ async def _run_research_pipeline(
             query=query[:50],
             dur_ms=int(execution_time * 1000)
         )
-        _append_to_research_log(query, source, None, execution_time, False)
+        await _append_to_research_log(query, source, None, execution_time, False)
 
     finally:
         _active_tasks.pop(task_id, None)
@@ -368,8 +370,8 @@ async def run_research_sync(
 
     execution_time = time.time() - start_time
 
-    report_path = _save_report(query, raw_report, analysis, source, execution_time)
-    _append_to_research_log(query, source, report_path, execution_time, True)
+    report_path = await _save_report(query, raw_report, analysis, source, execution_time)
+    await _append_to_research_log(query, source, report_path, execution_time, True)
 
     return f"""{analysis}
 

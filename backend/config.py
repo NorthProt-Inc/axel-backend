@@ -19,6 +19,7 @@ CHAT_THINKING_LEVEL = "high"
 
 MODEL_NAME = CHAT_MODEL
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
+EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "3072"))
 
 # Anthropic Chat Model (primary chat provider)
 ANTHROPIC_CHAT_MODEL = os.getenv("ANTHROPIC_CHAT_MODEL", "claude-sonnet-4-5-20250929")
@@ -151,6 +152,11 @@ def _get_int_env(name: str, default: int) -> int:
     except ValueError:
         _logger.warning("Invalid int env", env=name, value=raw)
         return default
+
+# PostgreSQL backend (set DATABASE_URL to enable PG mode, unset to keep SQLite/ChromaDB)
+DATABASE_URL = os.getenv("DATABASE_URL")  # e.g. postgresql://axel:pass@localhost:5432/axel
+PG_POOL_MIN = _get_int_env("PG_POOL_MIN", 2)
+PG_POOL_MAX = _get_int_env("PG_POOL_MAX", 10)
 
 # Context section budgets (chars). 30-turn working memory baseline.
 #   working: 30 turns × 2 msgs × ~2K chars ≈ 120K, with headroom

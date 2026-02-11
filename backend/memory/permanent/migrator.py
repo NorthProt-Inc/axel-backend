@@ -1,6 +1,6 @@
 """Legacy memory migration utilities."""
 
-from typing import Dict, Any
+from typing import Optional, Dict, Any
 
 import chromadb
 
@@ -16,7 +16,7 @@ class LegacyMemoryMigrator:
 
     def __init__(
         self,
-        old_db_path: str = None,
+        old_db_path: Optional[str] = None,
         new_long_term=None,
     ):
         """Initialize migrator.
@@ -35,7 +35,7 @@ class LegacyMemoryMigrator:
         Returns:
             Report with counts and samples
         """
-        report = {
+        report: Dict[str, Any] = {
             "total": 0,
             "promotable": 0,
             "rejected": 0,
@@ -49,15 +49,18 @@ class LegacyMemoryMigrator:
             for coll in collections:
                 results = coll.get(include=["documents", "metadatas"])
 
-                for i, doc in enumerate(results.get("documents", [])):
+                documents = results.get("documents") or []
+                metadatas = results.get("metadatas") or []
+
+                for i, doc in enumerate(documents):
                     report["total"] += 1
 
-                    metadata = results["metadatas"][i] if results.get("metadatas") else {}
-                    importance = metadata.get("importance", 0.3)
-                    repetitions = metadata.get("repetition_count", 1)
+                    metadata = metadatas[i] if i < len(metadatas) and metadatas[i] else {}
+                    importance = float(metadata.get("importance", None) or 0.3)  # type: ignore[arg-type]
+                    repetitions = int(metadata.get("repetition_count", None) or 1)  # type: ignore[arg-type]
 
                     should_keep, reason = PromotionCriteria.should_promote(
-                        content=doc,
+                        content=doc or "",
                         repetitions=repetitions,
                         importance=importance,
                     )
@@ -94,12 +97,8 @@ class LegacyMemoryMigrator:
         if not self.new_long_term and not dry_run:
             raise ValueError("new_long_term required for actual migration")
 
-        report = self.analyze_existing()
-
-        if dry_run:
-            report["action"] = "dry_run"
-            return report
-
+        # PERF-039: Reuse data from analyze to avoid double fetch
+        report: Dict[str, Any] = {"total": 0, "promotable": 0, "rejected": 0, "by_reason": {}, "samples": {"promotable": [], "rejected": []}}
         migrated = 0
 
         try:
@@ -108,36 +107,53 @@ class LegacyMemoryMigrator:
             for coll in collections:
                 results = coll.get(include=["documents", "metadatas"])
 
-                for i, doc in enumerate(results.get("documents", [])):
-                    metadata = results["metadatas"][i] if results.get("metadatas") else {}
-                    importance = metadata.get("importance", 0.3)
-                    repetitions = metadata.get("repetition_count", 1)
+                documents = results.get("documents") or []
+                metadatas = results.get("metadatas") or []
+
+                for i, doc in enumerate(documents):
+                    report["total"] += 1
+                    metadata = metadatas[i] if i < len(metadatas) and metadatas[i] else {}
+                    importance = float(metadata.get("importance", None) or 0.3)  # type: ignore[arg-type]
+                    repetitions = int(metadata.get("repetition_count", None) or 1)  # type: ignore[arg-type]
 
                     should_keep, reason = PromotionCriteria.should_promote(
-                        content=doc,
+                        content=doc or "",
                         repetitions=repetitions,
                         importance=importance,
                     )
 
                     if should_keep:
-                        mem_type = metadata.get("type", "insight")
-                        if mem_type == "conversation":
-                            mem_type = "insight"
+                        report["promotable"] += 1
+                        if len(report["samples"]["promotable"]) < 5:
+                            report["samples"]["promotable"].append({"content": doc[:100], "reason": reason})
 
-                        doc_id = self.new_long_term.add(
-                            content=doc,
-                            memory_type=mem_type,
-                            importance=importance,
-                            force=True,
-                        )
+                        # Only migrate if not dry_run
+                        if not dry_run:
+                            mem_type = metadata.get("type", "insight")
+                            if mem_type == "conversation":
+                                mem_type = "insight"
 
-                        if doc_id:
-                            migrated += 1
+                            doc_id = self.new_long_term.add(
+                                content=doc,
+                                memory_type=mem_type,
+                                importance=importance,
+                                force=True,
+                            )
+
+                            if doc_id:
+                                migrated += 1
+                    else:
+                        report["rejected"] += 1
+                        if len(report["samples"]["rejected"]) < 5:
+                            report["samples"]["rejected"].append({"content": doc[:100], "reason": reason})
+
+                    report["by_reason"][reason] = report["by_reason"].get(reason, 0) + 1
 
         except Exception as e:
             _log.error("Migration error", error=str(e))
 
-        report["action"] = "migrated"
-        report["migrated_count"] = migrated
+        report["action"] = "dry_run" if dry_run else "migrated"
+        if not dry_run:
+            report["migrated_count"] = migrated
 
         return report

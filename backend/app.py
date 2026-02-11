@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import asyncio
 import os
+import traceback  # PERF-041: Import at module level instead of in exception handler
 from uuid import uuid4
 from backend.core.utils.gemini_client import get_gemini_client
 from backend.config import (
@@ -18,6 +19,9 @@ from backend.config import (
     PERSONA_PATH,
     DEFAULT_GEMINI_MODEL,
     ensure_data_directories,
+    DATABASE_URL,
+    PG_POOL_MIN,
+    PG_POOL_MAX,
 )
 from backend.core import IdentityManager
 from backend.memory import MemoryManager
@@ -39,6 +43,9 @@ from backend.api import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Lifecycle handler for application startup and shutdown."""
+    # PERF-037: Call ensure_data_directories in lifespan only
+    ensure_data_directories()
 
     state = get_state()
     state.shutdown_event = asyncio.Event()
@@ -48,11 +55,36 @@ async def lifespan(app: FastAPI):
 
     mm = None
     ltm = None
+    pg_conn_mgr = None
+
+    # PostgreSQL connection pool (if DATABASE_URL is configured)
+    if DATABASE_URL:
+        try:
+            from backend.memory.pg import PgConnectionManager
+            pg_conn_mgr = PgConnectionManager(
+                dsn=DATABASE_URL,
+                minconn=PG_POOL_MIN,
+                maxconn=PG_POOL_MAX,
+            )
+            if pg_conn_mgr.health_check():
+                _log.info("APP PG pool ready", dsn=DATABASE_URL[:40] + "...")
+            else:
+                _log.warning("APP PG health check failed, falling back to legacy backends")
+                pg_conn_mgr.close()
+                pg_conn_mgr = None
+        except Exception as e:
+            _log.warning("APP PG pool creation failed, falling back to legacy backends", error=str(e))
+            pg_conn_mgr = None
+
     try:
         # Use Gemini for utility tasks (memory, graphrag, summarization)
         # Chat model is now Anthropic, handled separately by llm.router
         gem_client = get_gemini_client()
-        mm = MemoryManager(client=gem_client, model_name=DEFAULT_GEMINI_MODEL)
+        mm = MemoryManager(
+            client=gem_client,
+            model_name=DEFAULT_GEMINI_MODEL,
+            pg_conn_mgr=pg_conn_mgr,
+        )
         ltm = mm.long_term
         state.gemini_client = gem_client
     except Exception as e:
@@ -150,6 +182,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             _log.warning("APP access update flush failed", error=str(e))
 
+    # Close PG connection pool
+    if pg_conn_mgr is not None:
+        try:
+            pg_conn_mgr.close()
+            _log.info("APP PG pool closed")
+        except Exception as e:
+            _log.warning("APP PG pool close failed", error=str(e))
+
     # TTS manager shutdown (skip if never initialized)
     try:
         from backend.media.tts_manager import _lazy_tts_manager
@@ -212,8 +252,7 @@ _log.debug(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-
-    import traceback
+    """Handle all unhandled exceptions."""
     req_id = getattr(request.state, "request_id", None) or get_request_id()
 
     tb = traceback.format_exc()
@@ -239,17 +278,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-ensure_data_directories()
-
-identity_manager = IdentityManager(persona_path=str(PERSONA_PATH))
-
-_log.debug(
-    "APP module loaded",
-    version=APP_VERSION,
-    available_llms=[p['name'] for p in get_all_providers() if p['available']]
-)
-
-init_state(identity_manager=identity_manager)
+# PERF-037: Module-level initialization - IdentityManager created in lifespan
+init_state(identity_manager=None)
 app.state.axnmihn_state = get_state()
 
 if __name__ == "__main__":

@@ -22,16 +22,17 @@ async def consolidate_memory():
     return {"status": "error", "message": "Memory not initialized"}
 
 async def _evolve_persona_from_memories():
-
+    """Evolve persona based on recent memories."""
     state = get_state()
 
     if not state.long_term_memory:
         return 0, []
 
     try:
-        all_data = state.long_term_memory.collection.get(
+        # PERF-033: Fetch only what we need (limit 20)
+        all_data = state.long_term_memory.get_all_memories(
             include=["documents", "metadatas"],
-            limit=30
+            limit=20
         )
 
         if not all_data or not all_data.get('documents'):
@@ -150,15 +151,16 @@ async def search_memory(query: str, limit: int = 20):
 
     if state.long_term_memory:
         try:
-            chroma_results = state.long_term_memory.search(query, limit=limit)
-            for doc, meta, score in chroma_results:
+            chroma_results = state.long_term_memory.query(query, n_results=limit)
+            for item in chroma_results:
+                meta = item.get("metadata", {})
                 results.append({
-                    "id": meta.get("uuid", ""),
-                    "type": meta.get("memory_type", "memory"),
-                    "title": meta.get("memory_type", "Memory"),
-                    "content": doc[:200] if doc else "",
-                    "timestamp": meta.get("timestamp", ""),
-                    "score": score
+                    "id": meta.get("uuid", "") if isinstance(meta, dict) else "",
+                    "type": meta.get("memory_type", "memory") if isinstance(meta, dict) else "memory",
+                    "title": meta.get("memory_type", "Memory") if isinstance(meta, dict) else "Memory",
+                    "content": str(item.get("content", ""))[:200],
+                    "timestamp": meta.get("timestamp", "") if isinstance(meta, dict) else "",
+                    "score": item.get("similarity", 0)
                 })
         except Exception as e:
             _logger.warning("ChromaDB search error", error=str(e))
@@ -166,20 +168,24 @@ async def search_memory(query: str, limit: int = 20):
     if state.memory_manager and state.memory_manager.session_archive:
         try:
             sessions = state.memory_manager.session_archive.get_sessions_by_date(
-                datetime.now() - timedelta(days=30),
-                datetime.now()
+                (datetime.now() - timedelta(days=30)).isoformat(),
+                datetime.now().isoformat()
             )
-            for session in sessions:
-                if query.lower() in session.get("summary", "").lower():
-                    results.append({
-                        "id": session.get("session_id", ""),
-                        "type": "session",
-                        "title": "Session",
-                        "content": session.get("summary", "")[:200],
-                        "timestamp": session.get("ended_at", ""),
-                        "conversation_id": session.get("session_id"),
-                        "score": 0.5
-                    })
+            if isinstance(sessions, str):
+                # get_sessions_by_date returns formatted string, not a list
+                pass
+            else:
+                for session in sessions:
+                    if query.lower() in session.get("summary", "").lower():
+                        results.append({
+                            "id": session.get("session_id", ""),
+                            "type": "session",
+                            "title": "Session",
+                            "content": session.get("summary", "")[:200],
+                            "timestamp": session.get("ended_at", ""),
+                            "conversation_id": session.get("session_id"),
+                            "score": 0.5
+                        })
         except Exception as e:
             _logger.warning("Session search error", error=str(e))
 

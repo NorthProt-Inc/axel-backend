@@ -3,10 +3,14 @@
 import asyncio
 import os
 import random
+from typing import TYPE_CHECKING, Optional
 from urllib.parse import quote_plus
 
 from backend.core.logging import get_logger
 from backend.protocols.mcp.research.config import USER_AGENTS
+
+if TYPE_CHECKING:
+    import aiohttp
 
 _log = get_logger("research.search_engines")
 
@@ -48,12 +52,13 @@ def get_tavily_client():
 # ---------------------------------------------------------------------------
 # DuckDuckGo search
 # ---------------------------------------------------------------------------
-async def search_duckduckgo(query: str, num_results: int = 5) -> list[dict]:
+async def search_duckduckgo(query: str, num_results: int = 5, session: Optional["aiohttp.ClientSession"] = None) -> list[dict]:
     """Search DuckDuckGo HTML endpoint and parse results.
 
     Args:
         query: Search query string
         num_results: Maximum number of results to return
+        session: Optional aiohttp session for connection reuse
 
     Returns:
         List of dicts with title, url, snippet keys
@@ -71,8 +76,43 @@ async def search_duckduckgo(query: str, num_results: int = 5) -> list[dict]:
     results: list[dict] = []
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(search_url, headers=headers, timeout=15) as response:
+        if session is None:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
+                    if response.status != 200:
+                        _log.error("DuckDuckGo search failed", status=response.status, query=query[:50])
+                        return []
+
+                    html = await response.text()
+                    soup = BeautifulSoup(html, "html.parser")
+
+                    for result in soup.select(".result")[:num_results]:
+                        title_elem = result.select_one(".result__title a")
+                        snippet_elem = result.select_one(".result__snippet")
+
+                        if title_elem:
+                            href = title_elem.get("href", "")
+                            if isinstance(href, list):
+                                href = href[0] if href else ""
+                            href = str(href) if href else ""
+                            if "uddg=" in href:
+                                import urllib.parse
+
+                                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                                actual_url = parsed.get("uddg", [href])[0]
+                            else:
+                                actual_url = href
+
+                            results.append(
+                                {
+                                    "title": title_elem.get_text(strip=True),
+                                    "url": actual_url,
+                                    "snippet": snippet_elem.get_text(strip=True) if snippet_elem else "",
+                                }
+                            )
+        else:
+            # Reuse provided session
+            async with session.get(search_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status != 200:
                     _log.error("DuckDuckGo search failed", status=response.status, query=query[:50])
                     return []
@@ -86,6 +126,9 @@ async def search_duckduckgo(query: str, num_results: int = 5) -> list[dict]:
 
                     if title_elem:
                         href = title_elem.get("href", "")
+                        if isinstance(href, list):
+                            href = href[0] if href else ""
+                        href = str(href) if href else ""
                         if "uddg=" in href:
                             import urllib.parse
 

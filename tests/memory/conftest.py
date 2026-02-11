@@ -83,7 +83,7 @@ def mock_genai_client():
     # Mock embedding result
     mock_embedding_result = MagicMock()
     mock_embedding_value = MagicMock()
-    mock_embedding_value.values = [0.1] * 768  # 768-dim embedding
+    mock_embedding_value.values = [0.1] * 3072  # 3072-dim embedding
     mock_embedding_result.embeddings = [mock_embedding_value]
 
     client.models.embed_content.return_value = mock_embedding_result
@@ -92,8 +92,8 @@ def mock_genai_client():
 
 @pytest.fixture
 def sample_embedding() -> List[float]:
-    """Sample 768-dimensional embedding vector."""
-    return [0.1] * 768
+    """Sample 3072-dimensional embedding vector."""
+    return [0.1] * 3072
 
 
 @pytest.fixture

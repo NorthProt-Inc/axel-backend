@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import os
 import time
 import asyncio
-from typing import Dict
+from typing import TYPE_CHECKING, Dict, Optional
 from dataclasses import dataclass
 from datetime import datetime
 from backend.core.logging import get_logger
+
+if TYPE_CHECKING:
+    import aiohttp
 
 _logger = get_logger("error_monitor")
 
@@ -29,6 +34,21 @@ class ErrorMonitor:
         self._counters: Dict[str, ErrorCounter] = {}
         self._last_alert: Dict[str, float] = {}
         self._discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
+        self._session: Optional["aiohttp.ClientSession"] = None
+
+    def _get_session(self) -> "aiohttp.ClientSession":
+        """Return the shared aiohttp session, creating it lazily on first use."""
+        import aiohttp
+
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self) -> None:
+        """Close the shared aiohttp session. Call on shutdown."""
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+            self._session = None
 
     def record(self, error_type: str, details: str = "") -> None:
 
@@ -84,8 +104,6 @@ class ErrorMonitor:
     async def _send_discord_alert(self, error_type: str, counter: ErrorCounter, details: str) -> None:
 
         try:
-            import aiohttp
-
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             message = {
                 "embeds": [{
@@ -101,12 +119,12 @@ class ErrorMonitor:
                 }]
             }
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self._discord_webhook, json=message) as resp:
-                    if resp.status == 204:
-                        _logger.info("Discord alert sent", error_type=error_type)
-                    else:
-                        _logger.warning("Discord alert failed", status=resp.status)
+            session = self._get_session()
+            async with session.post(self._discord_webhook, json=message) as resp:
+                if resp.status == 204:
+                    _logger.info("Discord alert sent", error_type=error_type)
+                else:
+                    _logger.warning("Discord alert failed", status=resp.status)
 
         except Exception as e:
             _logger.error("Discord alert error", error=str(e))

@@ -7,7 +7,10 @@ from backend.core.logging import get_logger
 
 _log = get_logger("wake.runner")
 
-def main():
+# PERF-041: Use single event loop instead of asyncio.run() per wakeword
+async def main_async():
+    detector = None
+    handler = None
     try:
         _log.info("=== Axel Voice Asst starting ===")
 
@@ -24,7 +27,7 @@ def main():
                 player.play("listening")
 
                 try:
-                    result = asyncio.run(handler.handle_wakeword())
+                    result = await handler.handle_wakeword()
                     if result:
                         _log.info("conv done ok")
                         player.play("complete")
@@ -41,13 +44,20 @@ def main():
 
     except KeyboardInterrupt:
         _log.info("shutdown requested (Ctrl+C)")
-        if 'detector' in locals():
+        if detector:
             detector.stop()
-        if 'handler' in locals():
+        if handler:
             handler.close()
-        sys.exit(0)
     except Exception as e:
         _log.critical("fatal err", err=str(e))
+        raise
+
+def main():
+    try:
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except Exception:
         sys.exit(1)
 
 if __name__ == "__main__":

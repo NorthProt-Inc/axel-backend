@@ -375,7 +375,7 @@ _configure_root_logger()
 
 class StructuredLogger:
 
-    def __init__(self, name: str, level: int = None):
+    def __init__(self, name: str, level: Optional[int] = None):
         self._logger = logging.getLogger(name)
         effective_level = level or DEFAULT_LEVEL
         self._logger.setLevel(effective_level)
@@ -420,8 +420,9 @@ class StructuredLogger:
         )
         record.extra_data = kwargs
         self._logger.handle(record)
-        for h in self._logger.handlers:
-            h.flush()
+        if level >= logging.WARNING:
+            for h in self._logger.handlers:
+                h.flush()
 
     def debug(self, msg: str, **kwargs) -> None:
         self._log(logging.DEBUG, msg, **kwargs)
@@ -482,7 +483,7 @@ def logged(
                     _log._log(level, f"→ {fn_name}")
 
             try:
-                result = await func(*args, **kwargs)
+                result = await func(*args, **kwargs)  # type: ignore[misc]
                 if exit:
                     if log_result and result is not None:
                         _log._log(level, f"← {fn_name}", result=result)
@@ -524,7 +525,7 @@ def logged(
                 raise
 
         if inspect.iscoroutinefunction(func):
-            return async_wrapper
+            return async_wrapper  # type: ignore[return-value]
         return sync_wrapper
 
     return decorator

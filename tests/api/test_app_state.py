@@ -42,7 +42,7 @@ class TestAppStateReset:
         state.turn_count = 42
         state.background_tasks.append("task1")
         state.shutdown_event = "fake_event"
-        state.active_streams.append("stream1")
+        state.active_streams.add("stream1")  # Fix: use .add() for set not .append()
 
         state.reset()
 
@@ -56,7 +56,7 @@ class TestAppStateReset:
         assert state.turn_count == 0
         assert state.background_tasks == []
         assert state.shutdown_event is None
-        assert state.active_streams == []
+        assert state.active_streams == set()  # Fix: should be set not list
 
     def test_reset_preserves_identity(self) -> None:
         """reset() should return the same object, not a new one."""

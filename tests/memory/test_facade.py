@@ -74,7 +74,7 @@ class TestLongTermMemoryFacade:
 
         # Set up mock embedding service
         mock_embed = MagicMock(spec=EmbeddingService)
-        mock_embed.get_embedding.return_value = [0.1] * 768
+        mock_embed.get_embedding.return_value = [0.1] * 3072
         mock_embed.client = mock_genai_client
         ltm._embedding_service = mock_embed
 
@@ -112,15 +112,15 @@ class TestLongTermMemoryFacade:
         mock_ltm._repository.delete.assert_called_once_with(["mem-001", "mem-002"])
 
     def test_find_similar_memories(self, mock_ltm):
-        """find_similar_memories should return similar content."""
+        """find_similar_memories should return similar content with hybrid scoring."""
         mock_ltm._repository.query_by_embedding.return_value = [
-            {"id": "mem-001", "content": "Test", "metadata": {}, "similarity": 0.9},
-            {"id": "mem-002", "content": "Test2", "metadata": {}, "similarity": 0.7},
+            {"id": "mem-001", "content": "test content memo", "metadata": {}, "similarity": 0.95},
+            {"id": "mem-002", "content": "other memo", "metadata": {}, "similarity": 0.7},
         ]
 
         result = mock_ltm.find_similar_memories("test content", threshold=0.8)
 
-        assert len(result) == 1  # Only 0.9 >= 0.8
+        assert len(result) == 1  # Only mem-001 hybrid score >= 0.8
         assert result[0]["id"] == "mem-001"
 
     def test_get_embedding_for_text(self, mock_ltm):
@@ -128,7 +128,7 @@ class TestLongTermMemoryFacade:
         result = mock_ltm.get_embedding_for_text("test")
 
         assert result is not None
-        assert len(result) == 768
+        assert len(result) == 3072
         mock_ltm._embedding_service.get_embedding.assert_called_once()
 
     def test_backward_compatible_collection_property(self, mock_ltm):
@@ -156,7 +156,7 @@ class TestLongTermMemoryFacade:
     def test_flush_access_updates(self, mock_ltm):
         """flush_access_updates should update pending access times."""
         mock_ltm._pending_access_updates = {"mem-001", "mem-002"}
-        mock_ltm._repository.update_metadata.return_value = True
+        mock_ltm._repository.batch_update_metadata.return_value = 2
 
         updated = mock_ltm.flush_access_updates()
 

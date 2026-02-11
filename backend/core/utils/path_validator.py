@@ -60,10 +60,12 @@ def sanitize_path(path_str: str) -> str:
     if not path_str:
         return path_str
 
+    import re
+
     path_str = path_str.replace("\x00", "")
 
-    while "//" in path_str:
-        path_str = path_str.replace("//", "/")
+    # PERF-040: Use regex instead of while loop for efficiency
+    path_str = re.sub(r'/+', '/', path_str)
 
     path_str = path_str.strip()
 

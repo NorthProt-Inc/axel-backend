@@ -34,6 +34,7 @@ from .consolidator import MemoryConsolidator
 from .facade import LongTermMemory, PromotionCriteria
 from .importance import calculate_importance_async, calculate_importance_sync
 from .migrator import LegacyMemoryMigrator
+from typing import Optional
 
 __all__ = [
     # Main classes
@@ -62,18 +63,20 @@ __all__ = [
     "LegacyMemoryMigrator",
 ]
 
+# PERF-039: Module-level singleton to avoid re-instantiation
+_decay_calculator = AdaptiveDecayCalculator()
+
 
 def apply_adaptive_decay(
     importance: float,
     created_at: str,
     access_count: int = 0,
     connection_count: int = 0,
-    last_accessed: str = None,
-    memory_type: str = None,
+    last_accessed: Optional[str] = None,
+    memory_type: Optional[str] = None,
 ) -> float:
     """Backward compatible wrapper for AdaptiveDecayCalculator.calculate()."""
-    calculator = AdaptiveDecayCalculator()
-    return calculator.calculate(
+    return _decay_calculator.calculate(
         importance=importance,
         created_at=created_at,
         access_count=access_count,

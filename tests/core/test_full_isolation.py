@@ -19,9 +19,10 @@ class TestFullIsolationA:
         tracker = get_task_tracker()
         semaphore = _get_semaphore()
 
-        TestFullIsolationA.limiter_id = id(limiter)
-        TestFullIsolationA.tracker_id = id(tracker)
-        TestFullIsolationA.semaphore_id = id(semaphore)
+        # Keep strong references to prevent id() reuse after GC
+        TestFullIsolationA.old_limiter = limiter
+        TestFullIsolationA.old_tracker = tracker
+        TestFullIsolationA.old_semaphore = semaphore
 
         assert limiter is not None
         assert tracker is not None
@@ -42,6 +43,6 @@ class TestFullIsolationB:
         tracker = get_task_tracker()
         semaphore = _get_semaphore()
 
-        assert id(limiter) != TestFullIsolationA.limiter_id
-        assert id(tracker) != TestFullIsolationA.tracker_id
-        assert id(semaphore) != TestFullIsolationA.semaphore_id
+        assert limiter is not TestFullIsolationA.old_limiter
+        assert tracker is not TestFullIsolationA.old_tracker
+        assert semaphore is not TestFullIsolationA.old_semaphore

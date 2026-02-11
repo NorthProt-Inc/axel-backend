@@ -1,5 +1,6 @@
+import re
 from dataclasses import dataclass
-from typing import Dict, List, Literal
+from typing import Any, Dict, List, Literal
 from backend.core.logging import get_logger
 from backend.core.utils.text import truncate_text
 from backend.config import (
@@ -12,6 +13,11 @@ from backend.config import (
 )
 
 _log = get_logger("core.ctx_opt")
+
+# Pre-compiled regex for turn splitting (used on every message)
+_TURN_SPLIT_RE = re.compile(
+    r'(?=\[(?:User|Assistant|user|assistant|Mark|Axel)\]:|\[\d+[분시간일])'
+)
 
 @dataclass
 class SectionBudget:
@@ -170,7 +176,7 @@ class ContextOptimizer:
 
             return self._truncate(content, max_chars)
 
-        recent_turns = []
+        recent_turns: list[Any] = []
         recent_chars = 0
 
         for turn in reversed(turns):
@@ -202,12 +208,7 @@ class ContextOptimizer:
         return "\n\n".join(recent_turns)
 
     def _split_turns(self, content: str) -> List[str]:
-
-        import re
-
-        pattern = r'(?=\[(?:User|Assistant|user|assistant|Mark|Axel)\]:|\[\d+[분시간일])'
-        turns = re.split(pattern, content)
-
+        turns = _TURN_SPLIT_RE.split(content)
         return [t.strip() for t in turns if t.strip()]
 
     def build(self) -> str:

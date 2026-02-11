@@ -5,6 +5,8 @@ import wave
 import tempfile
 import httpx
 import asyncio
+import numpy as np
+import aiofiles  # type: ignore[import-untyped]
 from typing import Optional, List
 from backend.core.logging import get_logger
 
@@ -24,7 +26,7 @@ def split_sentences(text: str) -> List[str]:
     sentences = [s.strip() for s in sentences if s.strip()]
     return sentences if sentences else [text]
 
-API_BASE = os.environ.get("AXNMIHN_API", "http://localhost:8001")
+API_BASE = os.environ.get("AXNMIHN_API", "http://localhost:8000")
 API_KEY = os.environ.get("AXNMIHN_API_KEY") or os.environ.get("API_KEY")
 
 def _auth_headers() -> dict:
@@ -44,6 +46,13 @@ class ConversationHandler:
     def __init__(self, device_index: int = 11):
         self.device_index = device_index
         self.p = pyaudio.PyAudio()
+        self._http: httpx.AsyncClient | None = None
+
+    async def _get_http(self) -> httpx.AsyncClient:
+        """Return a persistent httpx.AsyncClient, creating on first use."""
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(timeout=60.0)
+        return self._http
 
     async def handle_wakeword(self) -> Optional[str]:
 
@@ -53,7 +62,7 @@ class ConversationHandler:
             await asyncio.sleep(0.5)
 
             _log.info("recording user speech")
-            audio_path = self._record_until_silence()
+            audio_path = await asyncio.to_thread(self._record_until_silence)
 
             if not audio_path:
                 _log.warning("no speech det")
@@ -114,8 +123,8 @@ class ConversationHandler:
             data = stream.read(CHUNK)
             frames.append(data)
 
-            amplitude = max(abs(int.from_bytes(data[i:i+2], 'little', signed=True))
-                          for i in range(0, len(data), 2))
+            samples = np.frombuffer(data, dtype=np.int16)
+            amplitude = int(np.max(np.abs(samples)))
 
             if amplitude > SILENCE_THRESHOLD:
                 has_speech = True
@@ -146,45 +155,46 @@ class ConversationHandler:
 
     async def _transcribe(self, audio_path: str) -> Optional[str]:
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            with open(audio_path, 'rb') as f:
-                files = {'file': ('audio.wav', f, 'audio/wav')}
-                resp = await client.post(
-                    f"{API_BASE}/v1/audio/transcriptions",
-                    files=files,
-                    data={'model': 'nova-3'},
-                    headers=_auth_headers()
-                )
+        client = await self._get_http()
+        async with aiofiles.open(audio_path, 'rb') as f:
+            audio_bytes = await f.read()
+        files = {'file': ('audio.wav', audio_bytes, 'audio/wav')}
+        resp = await client.post(
+            f"{API_BASE}/v1/audio/transcriptions",
+            files=files,
+            data={'model': 'nova-3'},
+            headers=_auth_headers()
+        )
 
-            if resp.status_code != 200:
-                _log.error("stt req fail", status=resp.status_code)
-                return None
+        if resp.status_code != 200:
+            _log.error("stt req fail", status=resp.status_code)
+            return None
 
-            text = resp.json().get('text', '')
-            _log.debug("stt done", chars=len(text))
-            return text
+        text = resp.json().get('text', '')
+        _log.debug("stt done", chars=len(text))
+        return text
 
     async def _chat(self, user_text: str) -> Optional[str]:
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{API_BASE}/v1/chat/completions",
-                json={
-                    "model": "auto",
-                    "messages": [{"role": "user", "content": user_text}],
-                    "stream": False
-                },
-                headers=_auth_headers()
-            )
+        client = await self._get_http()
+        resp = await client.post(
+            f"{API_BASE}/v1/chat/completions",
+            json={
+                "model": "auto",
+                "messages": [{"role": "user", "content": user_text}],
+                "stream": False
+            },
+            headers=_auth_headers()
+        )
 
-            if resp.status_code != 200:
-                _log.error("chat req fail", status=resp.status_code)
-                return None
+        if resp.status_code != 200:
+            _log.error("chat req fail", status=resp.status_code)
+            return None
 
-            data = resp.json()
-            content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
-            _log.debug("chat res recv", chars=len(content))
-            return content
+        data = resp.json()
+        content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+        _log.debug("chat res recv", chars=len(content))
+        return content
 
     async def _synthesize_sentence(self, text: str) -> Optional[bytes]:
         """Synthesize a single sentence to audio via TTS API.
@@ -221,7 +231,7 @@ class ConversationHandler:
         sentences = split_sentences(text)
         _log.info("tts streaming", sentences=len(sentences))
 
-        audio_queue = asyncio.Queue()
+        audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
         tts_done = asyncio.Event()
 
         async def tts_worker():

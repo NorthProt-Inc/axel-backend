@@ -174,7 +174,7 @@ def process_content_for_artifact(url: str, content: str) -> str:
         return content[:ARTIFACT_THRESHOLD] + f"\n\n[Content truncated at {ARTIFACT_THRESHOLD} chars due to artifact save failure]"
 
 def list_artifacts(limit: int = 20) -> list[dict]:
-
+    """List artifacts, reading only metadata header instead of full file."""
     if not ARTIFACTS_DIR.exists():
         return []
 
@@ -182,13 +182,15 @@ def list_artifacts(limit: int = 20) -> list[dict]:
 
     for file_path in sorted(ARTIFACTS_DIR.glob("*.md"), reverse=True)[:limit]:
         try:
-            content = file_path.read_text(encoding='utf-8')
+            # Read only first ~500 chars for metadata instead of entire file
+            with open(file_path, 'r', encoding='utf-8') as f:
+                header = f.read(500)
 
             url = ""
             saved_at = ""
 
-            if content.startswith('---'):
-                parts = content.split('---', 2)
+            if header.startswith('---'):
+                parts = header.split('---', 2)
                 if len(parts) >= 2:
                     metadata = parts[1]
                     for line in metadata.split('\n'):

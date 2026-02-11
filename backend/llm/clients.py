@@ -1,7 +1,7 @@
 import os
 import time
 from collections import deque
-from typing import AsyncGenerator, List, Dict, Any
+from typing import Optional, AsyncGenerator, List, Dict, Any
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from dotenv import load_dotenv
@@ -111,7 +111,7 @@ class CircuitBreakerState:
         remaining = int(self._open_until - time.time())
         return max(0, remaining)
 
-def _calculate_dynamic_timeout(tool_count: int, is_first_chunk: bool = True, model: str = None) -> int:
+def _calculate_dynamic_timeout(tool_count: int, is_first_chunk: bool = True, model: Optional[str] = None) -> int:
 
     return _adaptive_timeout.calculate(tool_count, model or "", is_first_chunk)
 
@@ -176,14 +176,14 @@ class BaseLLMClient(ABC):
         system_prompt: str = "",
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        images: List[Any] = None,
+        images: Optional[List[Any]] = None,
         enable_thinking: bool = False,
         thinking_level: str = "high",
-        tools: List[Dict] = None,
+        tools: Optional[List[Dict]] = None,
         force_tool_call: bool = False,
     ) -> AsyncGenerator[tuple, None]:
 
-        pass
+        yield  # type: ignore[misc]
 
     @abstractmethod
     async def generate(
@@ -192,7 +192,7 @@ class BaseLLMClient(ABC):
         system_prompt: str = "",
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        images: List[Any] = None,
+        images: Optional[List[Any]] = None,
     ) -> str:
 
         pass
@@ -208,7 +208,7 @@ def _gemini_schema_to_anthropic(schema: dict[str, Any]) -> dict[str, Any]:
     """
     if not isinstance(schema, dict):
         return schema
-    result = {}
+    result: dict[str, Any] = {}
     for key, value in schema.items():
         if key == "type" and isinstance(value, str):
             result[key] = value.lower()
@@ -233,7 +233,7 @@ class GeminiClient(BaseLLMClient):
 
         return not cls._circuit_breaker.can_proceed()
 
-    def __init__(self, model: str = None):
+    def __init__(self, model: Optional[str] = None):
         model = model or MODEL_NAME
         _log.debug("gemini client init start", model=model)
         from backend.core.utils.gemini_client import get_gemini_client
@@ -252,7 +252,7 @@ class GeminiClient(BaseLLMClient):
         thinking_level: str | None,
         tools: Any,
         force_tool_call: bool,
-    ) -> "types.GenerateContentConfig":
+    ) -> Any:
         """Build GenerateContentConfig from parameters."""
         from google.genai import types
 
@@ -266,7 +266,7 @@ class GeminiClient(BaseLLMClient):
         tool_config = None
         if tools and force_tool_call:
             tool_config = types.ToolConfig(
-                function_calling_config=types.FunctionCallingConfig(mode="ANY")
+                function_calling_config=types.FunctionCallingConfig(mode="ANY")  # type: ignore[arg-type]
             )
 
         return types.GenerateContentConfig(
@@ -283,15 +283,14 @@ class GeminiClient(BaseLLMClient):
         system_prompt: str = "",
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        images: List[Any] = None,
+        images: Optional[List[Any]] = None,
         enable_thinking: bool = False,
         thinking_level: str = "high",
-        tools: List[Dict] = None,
+        tools: Optional[List[Dict]] = None,
         force_tool_call: bool = False,
     ) -> AsyncGenerator[tuple, None]:
 
         import base64
-        import asyncio
 
         _log.debug("circuit breaker check",
                    state=GeminiClient._circuit_breaker._state,
@@ -373,11 +372,11 @@ class GeminiClient(BaseLLMClient):
 
         async def _create_stream() -> AsyncGenerator[tuple, None]:
             first_chunk_received = False
-            tool_count = len(gemini_tools[0].function_declarations) if gemini_tools else 0
+            tool_count = len(gemini_tools[0].function_declarations) if gemini_tools and gemini_tools[0].function_declarations else 0
 
-            async for chunk in self._client.aio.models.generate_content_stream(
+            async for chunk in self._client.aio.models.generate_content_stream(  # type: ignore[attr-defined]
                 model=self.model_name,
-                contents=contents,
+                contents=contents,  # type: ignore[arg-type]
                 config=config,
             ):
                 is_thought = False
@@ -389,7 +388,7 @@ class GeminiClient(BaseLLMClient):
                         candidate = chunk.candidates[0]
                         if hasattr(candidate, "content") and candidate.content:
                             parts_list = candidate.content.parts if hasattr(candidate.content, "parts") else []
-                            for part in parts_list:
+                            for part in (parts_list or []):
                                 if hasattr(part, "thought") and part.thought:
                                     is_thought = True
                                 if hasattr(part, "text") and part.text:
@@ -410,8 +409,8 @@ class GeminiClient(BaseLLMClient):
                 if not first_chunk_received:
                     first_chunk_received = True
 
-                for fc in function_calls:
-                    yield ("", False, fc)
+                for fc_item in function_calls:
+                    yield ("", False, fc_item)
 
                 if text_chunk and not function_calls:
                     yield (text_chunk, is_thought, None)
@@ -438,7 +437,7 @@ class GeminiClient(BaseLLMClient):
         system_prompt: str = "",
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        images: List[Any] = None,
+        images: Optional[List[Any]] = None,
     ) -> str:
 
         import base64
@@ -475,7 +474,7 @@ class GeminiClient(BaseLLMClient):
 
         response = await self._client.aio.models.generate_content(
             model=self.model_name,
-            contents=contents,
+            contents=contents,  # type: ignore[arg-type]
             config=config,
         )
         return response.text if response.text else ""
@@ -504,10 +503,10 @@ class AnthropicClient(BaseLLMClient):
         system_prompt: str = "",
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        images: List[Any] = None,
+        images: Optional[List[Any]] = None,
         enable_thinking: bool = False,
         thinking_level: str = "high",
-        tools: List[Dict] = None,
+        tools: Optional[List[Dict]] = None,
         force_tool_call: bool = False,
     ) -> AsyncGenerator[tuple, None]:
         import json as json_mod
@@ -657,7 +656,7 @@ class AnthropicClient(BaseLLMClient):
         system_prompt: str = "",
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        images: List[Any] = None,
+        images: Optional[List[Any]] = None,
     ) -> str:
         content: List[Dict[str, Any]] = []
         if images:

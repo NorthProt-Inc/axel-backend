@@ -24,6 +24,7 @@ def _make_consolidator(memories_data):
     repo.get_all.return_value = memories_data
     repo.delete.return_value = None
     repo.update_metadata.return_value = None
+    repo.batch_update_metadata.side_effect = lambda ids, metas: len(ids)
 
     calc = AdaptiveDecayCalculator()
     consolidator = MemoryConsolidator(
@@ -66,14 +67,15 @@ class TestSurvivingImportanceUpdated:
         # These memories should survive (high access/repetitions)
         assert report["deleted"] == 0
 
-        # Surviving memories should have update_metadata called
-        assert repo.update_metadata.call_count >= 1
+        # Surviving memories should have batch_update_metadata called
+        assert repo.batch_update_metadata.call_count >= 1
 
-        # Each call should set "importance" to a float
-        for c in repo.update_metadata.call_args_list:
-            doc_id, metadata = c[0]
-            assert "importance" in metadata
-            assert isinstance(metadata["importance"], float)
+        # The batch call should include importance floats
+        for c in repo.batch_update_metadata.call_args_list:
+            ids, metadatas = c[0]
+            for metadata in metadatas:
+                if "importance" in metadata:
+                    assert isinstance(metadata["importance"], float)
 
 
 class TestDeletedNotUpdated:
@@ -110,15 +112,15 @@ class TestDeletedNotUpdated:
         # del-1 should be deleted
         assert report["deleted"] >= 1
 
-        # Check that update_metadata was NOT called for the deleted doc
-        updated_ids = [c[0][0] for c in repo.update_metadata.call_args_list]
-
-        # update_metadata is called for preservation (if any) AND surviving updates
+        # Check that batch_update_metadata was NOT called for the deleted doc
+        # batch_update_metadata is called for preservation (if any) AND surviving updates
         # del-1 should NOT be in surviving updates
-        surviving_update_ids = [
-            c[0][0] for c in repo.update_metadata.call_args_list
-            if "importance" in c[0][1]
-        ]
+        surviving_update_ids = []
+        for c in repo.batch_update_metadata.call_args_list:
+            ids, metadatas = c[0]
+            for doc_id, metadata in zip(ids, metadatas):
+                if "importance" in metadata:
+                    surviving_update_ids.append(doc_id)
         assert "del-1" not in surviving_update_ids
 
 

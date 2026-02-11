@@ -121,7 +121,7 @@ class MemoryPersistenceService:
                     content=f"User: {user_input}\nAI: {response}",
                     memory_type="conversation",
                     importance=importance,
-                    source_session="unified"
+                    source_session=None
                 )
                 return memory_id
 
@@ -162,8 +162,8 @@ class MemoryPersistenceService:
             _log.debug("BG graph skip", error=str(e)[:100])
             return {"error": str(e), "entities_added": 0, "relations_added": 0}
 
-    def add_assistant_message(self, response: str) -> None:
+    async def add_assistant_message(self, response: str) -> None:
         """Add assistant message to working memory."""
         if response and self.memory_manager:
-            emotion = classify_emotion_sync(response)
+            emotion = await asyncio.to_thread(classify_emotion_sync, response)
             self.memory_manager.add_message("assistant", response, emotional_context=emotion)

@@ -26,22 +26,39 @@ class SessionArchive:
 
     Args:
         db_path: Path to the SQLite database file.
+        pg_conn_mgr: Optional PgConnectionManager. When provided,
+                     PostgreSQL is used instead of SQLite.
     """
 
-    def __init__(self, db_path: str = None):
-        self.db_path = Path(db_path) if db_path else SQLITE_MEMORY_PATH
-        self._conn_mgr = SQLiteConnectionManager(self.db_path)
-        SchemaManager(self._conn_mgr).initialize()
-        self._repo = SessionRepository(self._conn_mgr)
-        self._logger = InteractionLogger(self._conn_mgr)
-        self._summarizer = SessionSummarizer(self._repo)
+    def __init__(self, db_path: Optional[str] = None, pg_conn_mgr=None):
+        self._pg_mode = pg_conn_mgr is not None
+
+        if self._pg_mode:
+            from backend.memory.pg.session_repository import PgSessionRepository
+            from backend.memory.pg.interaction_logger import PgInteractionLogger
+
+            self._repo: Any = PgSessionRepository(pg_conn_mgr)
+            self._logger: Any = PgInteractionLogger(pg_conn_mgr)
+            self._conn_mgr = None
+            self._summarizer = SessionSummarizer(self._repo)
+            _log.info("SessionArchive using PostgreSQL backend")
+        else:
+            self.db_path = Path(db_path) if db_path else SQLITE_MEMORY_PATH
+            self._conn_mgr = SQLiteConnectionManager(self.db_path)
+            SchemaManager(self._conn_mgr).initialize()
+            self._repo = SessionRepository(self._conn_mgr)
+            self._logger = InteractionLogger(self._conn_mgr)
+            self._summarizer = SessionSummarizer(self._repo)
 
     # ── Backward-compat helper ───────────────────────────────────────────
 
     @contextmanager
     def _get_connection(self):
-        with self._conn_mgr.get_connection() as conn:
-            yield conn
+        if self._conn_mgr:
+            with self._conn_mgr.get_connection() as conn:
+                yield conn
+        else:
+            yield None
 
     # ── Message operations ───────────────────────────────────────────────
 
@@ -66,11 +83,11 @@ class SessionArchive:
         turn_count: int,
         started_at: datetime,
         ended_at: datetime,
-        messages: List[Dict] = None,
+        messages: Optional[List[Dict]] = None,
     ) -> bool:
         return self._repo.save_session(
             session_id, summary, key_topics, emotional_tone,
-            turn_count, started_at, ended_at, messages,
+            turn_count, started_at, ended_at, messages or [],
         )
 
     def get_session_messages(self, session_id: str) -> List[Dict[str, Any]]:
@@ -85,11 +102,11 @@ class SessionArchive:
     def get_sessions_by_date(
         self,
         from_date: str,
-        to_date: str = None,
+        to_date: Optional[str] = None,
         limit: int = 10,
         max_tokens: int = 3000,
     ) -> str:
-        return self._repo.get_sessions_by_date(from_date, to_date, limit, max_tokens)
+        return self._repo.get_sessions_by_date(from_date, to_date or "", limit, max_tokens)
 
     def get_recent_summaries(self, limit: int = 5, max_tokens: int = 2000) -> str:
         return self._repo.get_recent_summaries(limit, max_tokens)
@@ -108,20 +125,20 @@ class SessionArchive:
     def log_interaction(
         self,
         routing_decision: dict,
-        conversation_id: str = None,
-        turn_id: int = None,
-        latency_ms: int = None,
-        ttft_ms: int = None,
-        tokens_in: int = None,
-        tokens_out: int = None,
-        tool_calls: list = None,
+        conversation_id: Optional[str] = None,
+        turn_id: Optional[int] = None,
+        latency_ms: Optional[int] = None,
+        ttft_ms: Optional[int] = None,
+        tokens_in: Optional[int] = None,
+        tokens_out: Optional[int] = None,
+        tool_calls: Optional[list] = None,
         refusal_detected: bool = False,
-        response_text: str = None,
+        response_text: Optional[str] = None,
     ) -> bool:
         return self._logger.log_interaction(
-            routing_decision, conversation_id, turn_id,
-            latency_ms, ttft_ms, tokens_in, tokens_out,
-            tool_calls, refusal_detected, response_text,
+            routing_decision, conversation_id or "", turn_id or 0,
+            latency_ms or 0, ttft_ms or 0, tokens_in or 0, tokens_out or 0,
+            tool_calls or [], refusal_detected, response_text or "",
         )
 
     def get_recent_interaction_logs(self, limit: int = 20) -> List[Dict]:
@@ -139,7 +156,8 @@ class SessionArchive:
         return 0
 
     def close(self, silent: bool = False):
-        self._conn_mgr.close()
+        if self._conn_mgr:
+            self._conn_mgr.close()
         if not silent:
             try:
                 _log.info("Database connection closed")

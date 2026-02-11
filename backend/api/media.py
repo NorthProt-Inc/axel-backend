@@ -1,10 +1,7 @@
-import os
 import base64
 import re
 from pathlib import Path
-from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
-import aiofiles
 from backend.core.logging import get_logger
 from backend.config import (
     ALLOWED_TEXT_EXTENSIONS,
@@ -57,15 +54,9 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
     content = await read_upload_file(file, MAX_UPLOAD_BYTES)
-    new_filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
-    file_path = f"/tmp/{new_filename}"
-
-    async with aiofiles.open(file_path, "wb") as buffer:
-        await buffer.write(content)
 
     result = {
-        "filename": new_filename,
-        "path": file_path,
+        "filename": safe_name,
         "size": len(content),
         "type": file.content_type,
     }
@@ -82,11 +73,5 @@ async def upload_file(file: UploadFile = File(...)):
     elif file_extension in [".txt", ".md", ".json", ".py", ".js", ".ts", ".html", ".css"]:
         result["content"] = content.decode("utf-8", errors="ignore")
 
-    try:
-        os.remove(file_path)
-        _logger.debug("Uploaded file deleted", path=file_path)
-    except Exception as e:
-        _logger.warning("Failed to delete uploaded file", path=file_path, error=str(e))
-
-    _logger.info("RES sent", status=200, filename=new_filename, size=len(content))
+    _logger.info("RES sent", status=200, filename=safe_name, size=len(content))
     return result

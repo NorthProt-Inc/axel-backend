@@ -83,7 +83,7 @@ class AppState:
     shutdown_event: Any = None
 
     # Stream tracking
-    active_streams: List = field(default_factory=list)
+    active_streams: set = field(default_factory=set)  # Fix: should be set not List
 
     def reset(self) -> None:
         """Reset all fields to their defaults (in-place, preserves identity)."""
@@ -98,7 +98,7 @@ class AppState:
         self.turn_count = 0
         self.background_tasks = []
         self.shutdown_event = None
-        self.active_streams = []
+        self.active_streams = set()  # Fix: should be set not list
 
 state = AppState()
 
@@ -226,6 +226,7 @@ def require_api_key(request: Request) -> None:
     Raises:
         HTTPException: 401 if request is not authorized
     """
+    # PERF-033: Check authorization once
     if not is_request_authorized(request):
         request_key = get_request_api_key(request)
         _logger.warning(

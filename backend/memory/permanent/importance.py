@@ -1,7 +1,6 @@
 """Importance calculation functions for memory storage."""
 
 import re
-import asyncio
 from backend.core.logging import get_logger
 from backend.core.utils.gemini_client import get_gemini_client, get_model_name, gemini_generate
 

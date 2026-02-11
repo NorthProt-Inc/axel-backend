@@ -1,7 +1,7 @@
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import List, Deque
+from typing import Optional, List, Deque
 from pathlib import Path
 import threading
 import uuid
@@ -29,7 +29,7 @@ class TimestampedMessage:
     timestamp: datetime = field(default_factory=now_vancouver)
     emotional_context: str = "neutral"
 
-    def get_relative_time(self, reference: datetime = None) -> str:
+    def get_relative_time(self, reference: Optional[datetime] = None) -> str:
 
         ref = reference or now_vancouver()
         ts = ensure_aware(self.timestamp)
@@ -103,7 +103,7 @@ class WorkingMemory:
         _log.debug("msg added", role=normalized_role, content_len=len(content))
         return msg
 
-    def get_context(self, max_turns: int = None) -> str:
+    def get_context(self, max_turns: Optional[int] = None) -> str:
 
         turns = max_turns or self.MAX_TURNS
 
@@ -166,8 +166,10 @@ class WorkingMemory:
         return old_id
 
     def get_turn_count(self) -> int:
-
-        return len(self.messages) // 2
+        """Get number of conversation turns."""
+        # PERF-029: Don't copy entire deque just to count
+        with self._lock:
+            return len(self._messages) // 2
 
     def __len__(self) -> int:
         with self._lock:
@@ -206,12 +208,12 @@ class WorkingMemory:
 
         return "\n".join(compressed + full)
 
-    def get_messages_for_sql(self, max_turns: int = None) -> List[TimestampedMessage]:
+    def get_messages_for_sql(self, max_turns: Optional[int] = None) -> List[TimestampedMessage]:
 
         turns = max_turns or self.SQL_PERSIST_TURNS
         return self.messages[-(turns * 2):]
 
-    def save_to_disk(self, path: str = None) -> bool:
+    def save_to_disk(self, path: Optional[str] = None) -> bool:
 
         path = path or self.PERSISTENCE_PATH
         try:
@@ -236,7 +238,7 @@ class WorkingMemory:
             _log.info("save fail", error=str(e), path=path)
             return False
 
-    def load_from_disk(self, path: str = None) -> bool:
+    def load_from_disk(self, path: Optional[str] = None) -> bool:
 
         path = path or self.PERSISTENCE_PATH
         try:

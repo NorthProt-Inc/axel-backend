@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Callable
 from enum import Enum
@@ -89,6 +90,9 @@ class MCPServer:
         self.tool_handlers: Dict[str, Callable] = {}
 
         self.prompts: Dict[str, MCPPrompt] = {}
+
+        # PERF-032: Cache manifest
+        self._cached_manifest: Optional[Dict] = None
 
         self._setup_resources()
         self._setup_tools()
@@ -214,20 +218,22 @@ class MCPServer:
         )
 
     def register_resource(self, resource: MCPResource, handler: Callable):
-
+        """Register resource and invalidate manifest cache."""
         self.resources[resource.uri] = resource
         self.resource_handlers[resource.uri] = handler
+        self._cached_manifest = None  # PERF-032: Invalidate cache
         _log.debug("Resource reg", uri=resource.uri)
 
     def register_tool(self, tool: MCPTool, handler: Callable):
-
+        """Register tool and invalidate manifest cache."""
         self.tools[tool.name] = tool
         self.tool_handlers[tool.name] = handler
+        self._cached_manifest = None  # PERF-032: Invalidate cache
         _log.debug("Tool reg", name=tool.name)
 
     async def handle_request(self, request: MCPRequest) -> MCPResponse:
-
-        import time
+        """Handle MCP request."""
+        # PERF-032: Use module-level time import
         start_time = time.time()
         _log.info("REQ handling", method=request.method, params=list(request.params.keys()) if request.params else [])
 
@@ -387,16 +393,27 @@ class MCPServer:
         }
 
     async def _tool_search(self, query: str, source: str = "both") -> str:
-
-        results = []
+        """Search web and/or memory."""
+        # PERF-032: Parallelize web and memory search
+        tasks = []
 
         if source in ["web", "both"] and self.search:
-            web_result = await self.search.search(query, max_results=3)
-            results.append(f"[Web]\n{web_result}")
+            tasks.append(("web", self.search.search(query, max_results=3)))
 
         if source in ["memory", "both"] and self.memory and self.memory.long_term:
-            memory_result = self.memory.long_term.get_formatted_context(query, max_items=3)
-            results.append(f"[Memory]\n{memory_result}")
+            async def get_memory():
+                return self.memory.long_term.get_formatted_context(query, max_items=3)
+            tasks.append(("memory", get_memory()))
+
+        if not tasks:
+            return "No results"
+
+        results = []
+        gathered = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
+
+        for (label, _), result in zip(tasks, gathered):
+            if not isinstance(result, Exception) and result:
+                results.append(f"[{label.title()}]\n{result}")
 
         return "\n\n".join(results) if results else "No results"
 
@@ -450,8 +467,11 @@ class MCPServer:
         return []
 
     def get_manifest(self) -> Dict:
+        """Get server manifest (cached after first call - PERF-032)."""
+        if self._cached_manifest is not None:
+            return self._cached_manifest
 
-        return {
+        self._cached_manifest = {
             "server": self.SERVER_INFO,
             "resources": [
                 {
@@ -479,6 +499,7 @@ class MCPServer:
                 for p in self.prompts.values()
             ]
         }
+        return self._cached_manifest
 
 __all__ = [
     "MCPServer",

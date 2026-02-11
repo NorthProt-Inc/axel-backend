@@ -55,10 +55,11 @@ def convert_pdf_to_images(
                 converted=pages_to_convert
             )
 
+        # PERF-040: Estimate size without decoding (base64: 4 chars = 3 bytes)
         _logger.info(
             "PDF conversion complete",
             pages=len(images),
-            total_size_kb=sum(len(base64.b64decode(img["data"])) for img in images) // 1024
+            total_size_kb=sum(len(str(img["data"])) * 3 // 4 for img in images) // 1024
         )
 
         return images

@@ -19,7 +19,7 @@ class EmbeddingServiceProtocol(Protocol):
             task_type: Embedding task type (retrieval_document, retrieval_query)
 
         Returns:
-            768-dimensional embedding vector or None on failure
+            3072-dimensional embedding vector or None on failure
         """
         ...
 

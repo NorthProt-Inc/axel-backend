@@ -86,7 +86,7 @@ async def run_command(arguments: dict[str, Any]) -> Sequence[TextContent]:
         output_parts = []
         if result.returncode == 0:
             _log.info("TOOL ok", fn="run_command", exit_code=0, stdout_len=len(stdout_str))
-            output_parts.append(f"✓ Success (Exit: 0)")
+            output_parts.append("✓ Success (Exit: 0)")
         else:
             _log.warning("TOOL partial", fn="run_command", exit_code=result.returncode)
             output_parts.append(f"✗ Failed (Exit: {result.returncode})")

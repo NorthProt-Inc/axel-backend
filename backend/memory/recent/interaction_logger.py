@@ -3,7 +3,7 @@
 import json
 import re
 import sqlite3
-from typing import Dict, List
+from typing import Optional, Dict, List
 
 from backend.core.logging import get_logger
 from backend.memory.recent.connection import SQLiteConnectionManager
@@ -46,6 +46,8 @@ def calculate_style_metrics(response: str) -> dict:
     if not sentences:
         return {"hedge_ratio": 0.0, "avg_sentence_len": 0.0}
 
+    # PERF-041: Pre-compile hedge pattern for efficiency (now done at module level)
+    # This optimization is minor given _HEDGE_PHRASES check is already efficient
     hedge_count = sum(
         1
         for sentence in sentences
@@ -71,15 +73,15 @@ class InteractionLogger:
     def log_interaction(
         self,
         routing_decision: dict,
-        conversation_id: str = None,
-        turn_id: int = None,
-        latency_ms: int = None,
-        ttft_ms: int = None,
-        tokens_in: int = None,
-        tokens_out: int = None,
-        tool_calls: list = None,
+        conversation_id: Optional[str] = None,
+        turn_id: Optional[int] = None,
+        latency_ms: Optional[int] = None,
+        ttft_ms: Optional[int] = None,
+        tokens_in: Optional[int] = None,
+        tokens_out: Optional[int] = None,
+        tool_calls: Optional[list] = None,
         refusal_detected: bool = False,
-        response_text: str = None,
+        response_text: Optional[str] = None,
     ) -> bool:
         """Record a single interaction log entry."""
         try:

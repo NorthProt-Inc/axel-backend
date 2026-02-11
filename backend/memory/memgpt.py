@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
@@ -5,6 +6,9 @@ from backend.core.logging import get_logger
 from backend.core.utils.timezone import now_vancouver
 
 _log = get_logger("memory.memgpt")
+
+MAX_CONSOLIDATION_CONCURRENCY = 3
+_consolidation_semaphore = asyncio.Semaphore(MAX_CONSOLIDATION_CONCURRENCY)
 
 from backend.config import (
     MAX_CONTEXT_TOKENS as CONFIG_MAX_CONTEXT_TOKENS,
@@ -27,6 +31,9 @@ class MemGPTConfig:
 
     semantic_threshold_days: int = 5
     min_episodic_repetitions: int = 1
+
+    eviction_page_size: int = 200
+    llm_concurrency: int = 3
 
 DEFAULT_CONFIG = MemGPTConfig()
 
@@ -54,7 +61,7 @@ class MemGPTManager:
         long_term_memory,
         client=None,
         model_name: str | None = None,
-        config: MemGPTConfig = None,
+        config: Optional[MemGPTConfig] = None,
         # Backward compat: accept model= kwarg
         model=None,
     ):
@@ -71,9 +78,9 @@ class MemGPTManager:
     def context_budget_select(
         self,
         query: str,
-        token_budget: int = None,
-        candidate_memories: List[Dict] = None,
-        temporal_filter: dict = None
+        token_budget: Optional[int] = None,
+        candidate_memories: Optional[List[Dict]] = None,
+        temporal_filter: Optional[dict] = None
     ) -> Tuple[List[ScoredMemory], int]:
         """Select memories within a token budget using relevance scoring.
 
@@ -123,7 +130,7 @@ class MemGPTManager:
 
         selected = []
         used_tokens = 0
-        topic_counts = {}
+        topic_counts: dict[str, int] = {}
 
         for mem in scored:
 
@@ -169,9 +176,17 @@ class MemGPTManager:
         )
 
         try:
+            # Build a single GraphRAG instance for the entire eviction
+            # run so we don't reload the knowledge-graph JSON per memory.
+            try:
+                from backend.memory.graph_rag import GraphRAG
+                shared_graph = GraphRAG()
+            except ImportError:
+                shared_graph = None
 
             all_memories = self.long_term.get_all_memories(
-                include=["documents", "metadatas"]
+                include=["documents", "metadatas"],
+                limit=self.config.eviction_page_size,
             )
 
             if not all_memories or not all_memories.get('ids'):
@@ -188,7 +203,7 @@ class MemGPTManager:
                 repetitions = metadata.get('repetitions', 1)
                 access_count = metadata.get('access_count', 0)
 
-                connection_count = get_connection_count(doc_id)
+                connection_count = get_connection_count(doc_id, graph=shared_graph)
 
                 decayed_score = apply_adaptive_decay(
                     importance,
@@ -224,12 +239,13 @@ class MemGPTManager:
                 max_evict = max(0, total_memories - self.config.min_memories_keep)
                 to_evict = eviction_candidates[:max_evict]
 
-                for candidate in to_evict:
+                evict_ids = [c['id'] for c in to_evict]
+                if evict_ids:
                     try:
-                        self.long_term.delete_memories([candidate['id']])
-                        evicted_count += 1
+                        self.long_term.delete_memories(evict_ids)
+                        evicted_count = len(evict_ids)
                     except Exception as e:
-                        _log.warning("Eviction failed", id=candidate['id'], error=str(e))
+                        _log.warning("Batch eviction failed", count=len(evict_ids), error=str(e))
 
             result = {
                 "total_memories": len(all_memories['ids']),
@@ -249,8 +265,8 @@ class MemGPTManager:
 
     async def episodic_to_semantic(
         self,
-        min_age_days: int = None,
-        min_repetitions: int = None,
+        min_age_days: Optional[int] = None,
+        min_repetitions: Optional[int] = None,
         dry_run: bool = True
     ) -> Dict[str, Any]:
         """Transform episodic memories into generalized semantic knowledge.
@@ -374,6 +390,20 @@ class MemGPTManager:
             _log.error("Semantic transformation error", error=str(e))
             return {"error": str(e)}
 
+    async def episodic_to_semantic_limited(
+        self,
+        min_age_days: Optional[int] = None,
+        min_repetitions: Optional[int] = None,
+        dry_run: bool = True,
+    ) -> Dict[str, Any]:
+        """Concurrency-limited version of episodic_to_semantic."""
+        async with _consolidation_semaphore:
+            return await self.episodic_to_semantic(
+                min_age_days=min_age_days,
+                min_repetitions=min_repetitions,
+                dry_run=dry_run,
+            )
+
     async def _extract_semantic_knowledge(
         self,
         topic: str,
@@ -410,7 +440,7 @@ class MemGPTManager:
 """
 
         try:
-            response = self.client.models.generate_content(
+            response = await self.client.aio.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
             )
@@ -436,4 +466,6 @@ __all__ = [
     "ScoredMemory",
     "SemanticKnowledge",
     "DEFAULT_CONFIG",
+    "MAX_CONSOLIDATION_CONCURRENCY",
+    "_consolidation_semaphore",
 ]

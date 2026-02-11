@@ -81,16 +81,15 @@ class MemoryConsolidator:
                 else:
                     batch_data.append((i, doc_id, metadata))
 
-            # Process preservation first
-            for doc_id, metadata in to_preserve:
-                try:
-                    self.repository.update_metadata(
-                        doc_id,
-                        {**metadata, "preserved": True},
-                    )
-                    report["preserved"] += 1
-                except Exception as e:
-                    _log.warning("Preserve update failed", error=str(e), id=doc_id)
+            # Process preservation first (PERF-021: batch update)
+            if to_preserve:
+                preserve_ids = [doc_id for doc_id, _ in to_preserve]
+                preserve_metadatas = [{**metadata, "preserved": True} for _, metadata in to_preserve]
+                preserved_count = self.repository.batch_update_metadata(preserve_ids, preserve_metadatas)
+                report["preserved"] = preserved_count
+                if preserved_count < len(to_preserve):
+                    _log.warning("Some preservation updates failed",
+                                failed=len(to_preserve) - preserved_count)
 
             # Calculate decayed importance in batch
             to_delete, decayed_values = self._calculate_deletions_batch(batch_data)
@@ -101,21 +100,18 @@ class MemoryConsolidator:
                 self.repository.delete(to_delete)
                 _log.info("Deleted faded memories", count=len(to_delete))
 
-            # T-03: Update surviving memories' importance to decayed value
+            # T-03: Update surviving memories' importance to decayed value (PERF-022: batch update)
             surviving_updates = self._get_surviving_updates(
                 batch_data, decayed_values, to_delete
             )
             if surviving_updates:
-                updated = 0
-                for doc_id, new_importance in surviving_updates:
-                    try:
-                        self.repository.update_metadata(
-                            doc_id, {"importance": new_importance}
-                        )
-                        updated += 1
-                    except Exception as e:
-                        _log.warning("Surviving update failed", error=str(e), id=doc_id)
+                update_ids = [doc_id for doc_id, _ in surviving_updates]
+                update_metadatas = [{"importance": new_importance} for _, new_importance in surviving_updates]
+                updated = self.repository.batch_update_metadata(update_ids, update_metadatas)
                 report["surviving_updated"] = updated
+                if updated < len(surviving_updates):
+                    _log.warning("Some surviving updates failed",
+                                failed=len(surviving_updates) - updated)
 
             _log.info(
                 "MEM consolidate",
@@ -146,13 +142,21 @@ class MemoryConsolidator:
         if not batch_data:
             return [], []
 
+        # Build a single GraphRAG instance for the entire batch so we
+        # don't reload the knowledge-graph JSON for every memory.
+        try:
+            from backend.memory.graph_rag import GraphRAG
+            shared_graph = GraphRAG()
+        except ImportError:
+            shared_graph = None
+
         # Prepare batch input for decay calculator
         memories_for_decay = []
         for _, doc_id, metadata in batch_data:
             created_at = metadata.get("created_at") or metadata.get("timestamp", "")
             importance = metadata.get("importance", 0.5)
             access_count = metadata.get("access_count", 0)
-            connection_count = get_connection_count(doc_id)
+            connection_count = get_connection_count(doc_id, graph=shared_graph)
             last_accessed = metadata.get("last_accessed")
             memory_type = metadata.get("type")
 

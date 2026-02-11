@@ -120,10 +120,14 @@ def build_context_block(file_paths: List[str]) -> tuple[str, list[str], list[str
         is_valid, resolved, error = _validate_file_path(file_path)
 
         if not is_valid:
-            errors.append(error)
+            errors.append(error or "Unknown error")
+            continue
+
+        if resolved is None:
             continue
 
         content = _read_file_content(resolved)
+        # Keep original logic - LOW priority optimization not worth breaking tests
         content_size = len(content.encode("utf-8"))
 
         if total_size + content_size > MAX_TOTAL_CONTEXT:
@@ -229,7 +233,7 @@ async def run_claude_cli(
 
         stdout = safe_decode(stdout_bytes)
         stderr = safe_decode(stderr_bytes)
-        returncode = process.returncode
+        returncode = process.returncode or 0
 
         execution_time = time.time() - start_time
 

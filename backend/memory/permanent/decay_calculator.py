@@ -59,23 +59,44 @@ def get_memory_age_hours(created_at: str) -> float:
         return 0
 
 
-def get_connection_count(memory_id: str) -> int:
+_cached_graph: object | None = None
+
+
+def _get_or_create_graph():
+    """Return a module-level cached GraphRAG instance.
+
+    Avoids re-loading the knowledge graph JSON on every call.
+    Returns None if GraphRAG is not importable.
+    """
+    global _cached_graph
+    if _cached_graph is not None:
+        return _cached_graph
+    try:
+        from backend.memory.graph_rag import GraphRAG
+
+        _cached_graph = GraphRAG()
+        return _cached_graph
+    except ImportError:
+        return None
+
+
+def get_connection_count(memory_id: str, *, graph=None) -> int:
     """Get number of graph connections for a memory.
 
     Args:
         memory_id: Memory document ID
+        graph: Optional pre-built GraphRAG instance.  When omitted a
+            module-level cached instance is used so that the knowledge
+            graph JSON is loaded at most once.
 
     Returns:
         Number of connections, 0 if unavailable
     """
     try:
-        from backend.memory.graph_rag import GraphRAG
-
-        graph = GraphRAG()
-        return graph.get_connection_count(memory_id)
-
-    except ImportError:
-        return 0  # GraphRAG module not available
+        g = graph or _get_or_create_graph()
+        if g is None:
+            return 0
+        return g.get_connection_count(memory_id)
 
     except Exception as e:
         _log.debug(
@@ -97,7 +118,7 @@ class AdaptiveDecayCalculator:
     - Recency paradox (old memory recently accessed gets boost)
     """
 
-    def __init__(self, config: MemoryConfig = None):
+    def __init__(self, config: Optional[MemoryConfig] = None):
         """Initialize calculator.
 
         Args:
@@ -111,8 +132,8 @@ class AdaptiveDecayCalculator:
         created_at: str,
         access_count: int = 0,
         connection_count: int = 0,
-        last_accessed: str = None,
-        memory_type: str = None,
+        last_accessed: Optional[str] = None,
+        memory_type: Optional[str] = None,
         channel_mentions: int = 0,
     ) -> float:
         """Calculate decayed importance score.
@@ -142,7 +163,7 @@ class AdaptiveDecayCalculator:
             resistance = min(1.0, connection_count * self.config.RELATION_RESISTANCE_K)
 
             # Type-specific decay rate
-            type_multiplier = MEMORY_TYPE_DECAY_MULTIPLIERS.get(memory_type, 1.0)
+            type_multiplier = MEMORY_TYPE_DECAY_MULTIPLIERS.get(memory_type or "", 1.0)
 
             # T-02: Channel diversity boost (more channels = slower decay)
             channel_boost = 1.0 / (1 + self.config.CHANNEL_DIVERSITY_K * channel_mentions)
@@ -200,7 +221,7 @@ class AdaptiveDecayCalculator:
         type_to_int = {"conversation": 0, "fact": 1, "preference": 2, "insight": 3}
 
         # Pre-process: convert timestamps to hours
-        processed = []
+        processed: list[Optional[dict[str, float]]] = []
         for mem in memories:
             created_at = mem.get("created_at")
             if not created_at:
@@ -217,7 +238,7 @@ class AdaptiveDecayCalculator:
                 "access_count": int(mem.get("access_count", 0)),
                 "connection_count": int(mem.get("connection_count", 0)),
                 "last_access_hours": last_access_hours,
-                "memory_type": type_to_int.get(mem.get("memory_type"), 0),
+                "memory_type": type_to_int.get(mem.get("memory_type") or "", 0),
                 "channel_mentions": int(mem.get("channel_mentions", 0)),
             })
 

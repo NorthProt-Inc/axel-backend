@@ -1,11 +1,13 @@
 """Tests for centralized configuration constants.
 
 Validates that all magic numbers are defined in config.py with proper defaults
-and support environment variable overrides.
+and support environment variable overrides.  Also covers helper functions:
+get_cors_origins, _get_size_bytes, _get_int_env, _get_float_env, ensure_data_directories.
 """
 
 import os
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 
 class TestTimeoutConstants:
@@ -234,3 +236,336 @@ class TestShutdownConstants:
         from backend.config import SHUTDOWN_HTTP_POOL_TIMEOUT
 
         assert SHUTDOWN_HTTP_POOL_TIMEOUT == 2.0
+
+
+# ============================================================================
+# get_cors_origins()
+# ============================================================================
+
+class TestGetCorsOrigins:
+    """CORS origin list from env or defaults."""
+
+    def test_default_origins_when_env_empty(self):
+        from backend.config import get_cors_origins
+
+        with patch.dict(os.environ, {"CORS_ALLOW_ORIGINS": ""}, clear=False):
+            # Re-import to reset CORS_ALLOW_ORIGINS would require module reload,
+            # but get_cors_origins reads the module-level variable.
+            # Instead, test the function's internal logic by patching the module var.
+            with patch("backend.config.CORS_ALLOW_ORIGINS", ""):
+                origins = get_cors_origins()
+                assert isinstance(origins, list)
+                assert "http://localhost:3000" in origins
+                assert "http://localhost:5173" in origins
+                assert len(origins) == 4
+
+    def test_custom_origins_from_env(self):
+        from backend.config import get_cors_origins
+
+        with patch("backend.config.CORS_ALLOW_ORIGINS", "https://example.com,https://app.test"):
+            origins = get_cors_origins()
+            assert origins == ["https://example.com", "https://app.test"]
+
+    def test_strips_whitespace(self):
+        from backend.config import get_cors_origins
+
+        with patch("backend.config.CORS_ALLOW_ORIGINS", " https://a.com , https://b.com "):
+            origins = get_cors_origins()
+            assert origins == ["https://a.com", "https://b.com"]
+
+    def test_filters_empty_entries(self):
+        from backend.config import get_cors_origins
+
+        with patch("backend.config.CORS_ALLOW_ORIGINS", "https://a.com,,, ,https://b.com"):
+            origins = get_cors_origins()
+            assert origins == ["https://a.com", "https://b.com"]
+
+
+# ============================================================================
+# _get_size_bytes()
+# ============================================================================
+
+class TestGetSizeBytes:
+    """_get_size_bytes reads bytes_env first, then mb_env, then default."""
+
+    def test_default_mb_when_no_env(self):
+        from backend.config import _get_size_bytes
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TEST_BYTES", None)
+            os.environ.pop("TEST_MB", None)
+            result = _get_size_bytes("TEST_BYTES", "TEST_MB", 10)
+            assert result == 10 * 1024 * 1024
+
+    def test_bytes_env_takes_priority(self):
+        from backend.config import _get_size_bytes
+
+        with patch.dict(os.environ, {"TEST_BYTES": "5000", "TEST_MB": "99"}):
+            result = _get_size_bytes("TEST_BYTES", "TEST_MB", 10)
+            assert result == 5000
+
+    def test_mb_env_converted_to_bytes(self):
+        from backend.config import _get_size_bytes
+
+        with patch.dict(os.environ, {"TEST_MB": "5"}, clear=False):
+            os.environ.pop("TEST_BYTES", None)
+            result = _get_size_bytes("TEST_BYTES", "TEST_MB", 10)
+            assert result == 5 * 1024 * 1024
+
+    def test_mb_env_handles_float(self):
+        from backend.config import _get_size_bytes
+
+        with patch.dict(os.environ, {"TEST_MB": "2.5"}, clear=False):
+            os.environ.pop("TEST_BYTES", None)
+            result = _get_size_bytes("TEST_BYTES", "TEST_MB", 10)
+            assert result == int(2.5 * 1024 * 1024)
+
+    def test_invalid_bytes_env_falls_to_mb(self):
+        from backend.config import _get_size_bytes
+
+        with patch.dict(os.environ, {"TEST_BYTES": "bad", "TEST_MB": "3"}):
+            result = _get_size_bytes("TEST_BYTES", "TEST_MB", 10)
+            assert result == 3 * 1024 * 1024
+
+    def test_invalid_both_falls_to_default(self):
+        from backend.config import _get_size_bytes
+
+        with patch.dict(os.environ, {"TEST_BYTES": "bad", "TEST_MB": "bad"}):
+            result = _get_size_bytes("TEST_BYTES", "TEST_MB", 10)
+            assert result == 10 * 1024 * 1024
+
+    def test_negative_bytes_clamp_to_zero(self):
+        from backend.config import _get_size_bytes
+
+        with patch.dict(os.environ, {"TEST_BYTES": "-100"}, clear=False):
+            os.environ.pop("TEST_MB", None)
+            result = _get_size_bytes("TEST_BYTES", "TEST_MB", 10)
+            assert result == 0
+
+
+# ============================================================================
+# _get_int_env()
+# ============================================================================
+
+class TestGetIntEnv:
+    """_get_int_env reads integer from env or returns default."""
+
+    def test_returns_default_when_not_set(self):
+        from backend.config import _get_int_env
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TEST_INT_UNSET", None)
+            assert _get_int_env("TEST_INT_UNSET", 42) == 42
+
+    def test_returns_env_value(self):
+        from backend.config import _get_int_env
+
+        with patch.dict(os.environ, {"TEST_INT": "99"}):
+            assert _get_int_env("TEST_INT", 42) == 99
+
+    def test_invalid_value_returns_default(self):
+        from backend.config import _get_int_env
+
+        with patch.dict(os.environ, {"TEST_INT": "not_int"}):
+            assert _get_int_env("TEST_INT", 42) == 42
+
+    def test_zero_is_valid(self):
+        from backend.config import _get_int_env
+
+        with patch.dict(os.environ, {"TEST_INT": "0"}):
+            assert _get_int_env("TEST_INT", 42) == 0
+
+    def test_negative_value(self):
+        from backend.config import _get_int_env
+
+        with patch.dict(os.environ, {"TEST_INT": "-5"}):
+            assert _get_int_env("TEST_INT", 42) == -5
+
+
+# ============================================================================
+# _get_float_env()
+# ============================================================================
+
+class TestGetFloatEnv:
+    """_get_float_env reads float from env or returns default."""
+
+    def test_returns_default_when_not_set(self):
+        from backend.config import _get_float_env
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("TEST_FLOAT_UNSET", None)
+            assert _get_float_env("TEST_FLOAT_UNSET", 3.14) == 3.14
+
+    def test_returns_env_value(self):
+        from backend.config import _get_float_env
+
+        with patch.dict(os.environ, {"TEST_FLOAT": "2.718"}):
+            assert _get_float_env("TEST_FLOAT", 3.14) == 2.718
+
+    def test_integer_string_parsed_as_float(self):
+        from backend.config import _get_float_env
+
+        with patch.dict(os.environ, {"TEST_FLOAT": "10"}):
+            assert _get_float_env("TEST_FLOAT", 3.14) == 10.0
+
+    def test_invalid_value_returns_default(self):
+        from backend.config import _get_float_env
+
+        with patch.dict(os.environ, {"TEST_FLOAT": "not_float"}):
+            assert _get_float_env("TEST_FLOAT", 3.14) == 3.14
+
+    def test_zero_is_valid(self):
+        from backend.config import _get_float_env
+
+        with patch.dict(os.environ, {"TEST_FLOAT": "0.0"}):
+            assert _get_float_env("TEST_FLOAT", 3.14) == 0.0
+
+
+# ============================================================================
+# ensure_data_directories()
+# ============================================================================
+
+class TestEnsureDataDirectories:
+    """ensure_data_directories creates required directories."""
+
+    def test_creates_directories(self, tmp_path):
+        from backend.config import ensure_data_directories
+
+        with patch("backend.config.DATA_ROOT", tmp_path / "data"), \
+             patch("backend.config.TEMP_DIR", tmp_path / "data" / "tmp"), \
+             patch("backend.config.CHROMADB_PATH", tmp_path / "data" / "chroma"), \
+             patch("backend.config.STORAGE_ROOT", tmp_path / "storage"), \
+             patch("backend.config.RESEARCH_INBOX_DIR", tmp_path / "storage" / "research" / "inbox"), \
+             patch("backend.config.RESEARCH_ARTIFACTS_DIR", tmp_path / "storage" / "research" / "artifacts"), \
+             patch("backend.config.CRON_REPORTS_DIR", tmp_path / "storage" / "cron" / "reports"), \
+             patch("backend.config.LOGS_DIR", tmp_path / "logs"):
+            ensure_data_directories()
+            assert (tmp_path / "data").exists()
+            assert (tmp_path / "data" / "tmp").exists()
+            assert (tmp_path / "storage").exists()
+            assert (tmp_path / "logs").exists()
+
+    def test_does_not_raise_on_mkdir_failure(self, tmp_path):
+        """If a directory cannot be created, it logs warning but doesn't raise."""
+        from backend.config import ensure_data_directories
+
+        # Use a file as the parent so mkdir fails
+        blocker = tmp_path / "blocker"
+        blocker.write_text("I'm a file, not a directory")
+
+        with patch("backend.config.DATA_ROOT", blocker / "data"), \
+             patch("backend.config.TEMP_DIR", tmp_path / "ok" / "tmp"), \
+             patch("backend.config.CHROMADB_PATH", tmp_path / "ok" / "chroma"), \
+             patch("backend.config.STORAGE_ROOT", tmp_path / "ok" / "storage"), \
+             patch("backend.config.RESEARCH_INBOX_DIR", tmp_path / "ok" / "ri"), \
+             patch("backend.config.RESEARCH_ARTIFACTS_DIR", tmp_path / "ok" / "ra"), \
+             patch("backend.config.CRON_REPORTS_DIR", tmp_path / "ok" / "cr"), \
+             patch("backend.config.LOGS_DIR", tmp_path / "ok" / "logs"):
+            # Should not raise
+            ensure_data_directories()
+
+
+# ============================================================================
+# Path constants
+# ============================================================================
+
+class TestPathConstants:
+    """Verify path constants are Path objects and consistent."""
+
+    def test_project_root_is_path(self):
+        from backend.config import PROJECT_ROOT
+        assert isinstance(PROJECT_ROOT, Path)
+
+    def test_backend_root_is_path(self):
+        from backend.config import BACKEND_ROOT
+        assert isinstance(BACKEND_ROOT, Path)
+
+    def test_backend_root_is_child_of_project_root(self):
+        from backend.config import PROJECT_ROOT, BACKEND_ROOT
+        assert str(BACKEND_ROOT).startswith(str(PROJECT_ROOT))
+
+    def test_data_root_under_project(self):
+        from backend.config import PROJECT_ROOT, DATA_ROOT
+        assert DATA_ROOT == PROJECT_ROOT / "data"
+
+
+# ============================================================================
+# Miscellaneous config values
+# ============================================================================
+
+class TestMiscConfig:
+    """Various configuration values with expected defaults."""
+
+    def test_host_default(self):
+        from backend.config import HOST
+        assert HOST == "0.0.0.0" or isinstance(HOST, str)
+
+    def test_port_is_int(self):
+        from backend.config import PORT
+        assert isinstance(PORT, int)
+
+    def test_embedding_dimension_default(self):
+        from backend.config import EMBEDDING_DIMENSION
+        assert EMBEDDING_DIMENSION == 3072
+
+    def test_deep_search_enabled_is_bool(self):
+        from backend.config import DEEP_SEARCH_ENABLED
+        assert isinstance(DEEP_SEARCH_ENABLED, bool)
+
+    def test_allowed_text_extensions(self):
+        from backend.config import ALLOWED_TEXT_EXTENSIONS
+        assert ".py" in ALLOWED_TEXT_EXTENSIONS
+        assert ".json" in ALLOWED_TEXT_EXTENSIONS
+
+    def test_allowed_image_extensions(self):
+        from backend.config import ALLOWED_IMAGE_EXTENSIONS
+        assert ".png" in ALLOWED_IMAGE_EXTENSIONS
+        assert ".jpg" in ALLOWED_IMAGE_EXTENSIONS
+
+    def test_max_context_tokens_positive(self):
+        from backend.config import MAX_CONTEXT_TOKENS
+        assert MAX_CONTEXT_TOKENS > 0
+
+    def test_memory_budgets_positive(self):
+        from backend.config import (
+            BUDGET_SYSTEM_PROMPT,
+            BUDGET_TEMPORAL,
+            BUDGET_WORKING_MEMORY,
+            BUDGET_LONG_TERM,
+            BUDGET_GRAPHRAG,
+            BUDGET_SESSION_ARCHIVE,
+        )
+        for val in [BUDGET_SYSTEM_PROMPT, BUDGET_TEMPORAL, BUDGET_WORKING_MEMORY,
+                     BUDGET_LONG_TERM, BUDGET_GRAPHRAG, BUDGET_SESSION_ARCHIVE]:
+            assert val > 0
+
+    def test_pg_pool_defaults(self):
+        from backend.config import PG_POOL_MIN, PG_POOL_MAX
+        assert PG_POOL_MIN == 2
+        assert PG_POOL_MAX == 10
+
+    def test_mcp_disabled_tools_is_set(self):
+        from backend.config import MCP_DISABLED_TOOLS
+        assert isinstance(MCP_DISABLED_TOOLS, set)
+
+    def test_mcp_disabled_categories_is_set(self):
+        from backend.config import MCP_DISABLED_CATEGORIES
+        assert isinstance(MCP_DISABLED_CATEGORIES, set)
+
+    def test_context_io_timeout_is_float(self):
+        from backend.config import CONTEXT_IO_TIMEOUT
+        assert isinstance(CONTEXT_IO_TIMEOUT, float)
+
+    def test_memory_decay_constants(self):
+        from backend.config import (
+            MEMORY_BASE_DECAY_RATE,
+            MEMORY_MIN_RETENTION,
+            MEMORY_DECAY_DELETE_THRESHOLD,
+            MEMORY_SIMILARITY_THRESHOLD,
+            MEMORY_MIN_IMPORTANCE,
+        )
+        assert 0 < MEMORY_BASE_DECAY_RATE < 1
+        assert 0 < MEMORY_MIN_RETENTION < 1
+        assert 0 < MEMORY_DECAY_DELETE_THRESHOLD < 1
+        assert 0 < MEMORY_SIMILARITY_THRESHOLD <= 1
+        assert 0 < MEMORY_MIN_IMPORTANCE < 1

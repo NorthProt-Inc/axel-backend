@@ -1,4 +1,5 @@
 import asyncio
+import re
 import threading
 import time
 from datetime import datetime, timedelta
@@ -26,6 +27,8 @@ from .memgpt import MemGPTManager, MemGPTConfig
 from .graph_rag import GraphRAG, KnowledgeGraph
 from .event_buffer import EventBuffer, EventType, StreamEvent
 from .meta_memory import MetaMemory
+from backend.core.security.prompt_defense import sanitize_input, filter_output
+from backend.core.persona.channel_adaptation import get_channel_hint
 
 SESSION_SUMMARY_PROMPT = """
 다음 대화를 분석하고 요약해주세요.
@@ -52,13 +55,14 @@ class MemoryManager:
 
     def __init__(
         self,
-        client: Any = None,
+        client: Optional[Any] = None,
         model_name: str | None = None,
-        working_memory: WorkingMemory = None,
-        session_archive: SessionArchive = None,
-        long_term_memory: LongTermMemory = None,
+        working_memory: Optional[WorkingMemory] = None,
+        session_archive: Optional[SessionArchive] = None,
+        long_term_memory: Optional[LongTermMemory] = None,
+        pg_conn_mgr=None,
         # Backward compat: accept model= kwarg and ignore it
-        model: Any = None,
+        model: Optional[Any] = None,
     ):
         from google import genai
 
@@ -78,9 +82,31 @@ class MemoryManager:
             from backend.core.utils.gemini_client import get_model_name
             self.model_name = get_model_name()
 
-        self.working = working_memory or WorkingMemory()
-        self.session_archive = session_archive or SessionArchive()
-        self.long_term = long_term_memory or LongTermMemory()
+        self._pg_conn_mgr = pg_conn_mgr
+
+        # ── Build components with PG or legacy backends ──────────
+        if pg_conn_mgr is not None:
+            from backend.memory.pg.memory_repository import PgMemoryRepository
+            from backend.memory.pg.graph_repository import PgGraphRepository
+            from backend.memory.pg.meta_repository import PgMetaMemoryRepository
+
+            pg_mem_repo = PgMemoryRepository(pg_conn_mgr)
+            pg_graph_repo = PgGraphRepository(pg_conn_mgr)
+            pg_meta_repo = PgMetaMemoryRepository(pg_conn_mgr)
+
+            self.working = working_memory or WorkingMemory()
+            self.session_archive = session_archive or SessionArchive(pg_conn_mgr=pg_conn_mgr)
+            self.long_term = long_term_memory or LongTermMemory(repository=pg_mem_repo)
+            self.knowledge_graph = KnowledgeGraph(pg_repository=pg_graph_repo)
+            self.meta_memory = MetaMemory(pg_repository=pg_meta_repo)
+
+            _log.info("MemoryManager using PostgreSQL backend")
+        else:
+            self.working = working_memory or WorkingMemory()
+            self.session_archive = session_archive or SessionArchive()
+            self.long_term = long_term_memory or LongTermMemory()
+            self.knowledge_graph = KnowledgeGraph()
+            self.meta_memory = MetaMemory()
 
         self._last_session_end: Optional[datetime] = None
 
@@ -91,24 +117,23 @@ class MemoryManager:
             config=MemGPTConfig()
         )
 
-        self.knowledge_graph = KnowledgeGraph()
         self.graph_rag = GraphRAG(client=client, model_name=self.model_name, graph=self.knowledge_graph)
 
         # M0: Event Buffer (session-scoped, in-memory)
         self.event_buffer = EventBuffer()
-        # M5: Meta Memory (access pattern tracking)
-        self.meta_memory = MetaMemory()
 
         self._write_lock = threading.Lock()
         self._read_semaphore = threading.Semaphore(5)
 
-    LOG_PATTERNS = [
-        "[Tavily]", "[TTS Error]", "[Memory]", "[System]",
-        "[Router]", "[LLM]", "[Error]", "[Warning]",
-        "[Keywords]", "[Long-term Memory", "[Current]",
-        "FutureWarning:", "DeprecationWarning:",
-        "Permission denied", "Traceback",
-    ]
+        # PERF-028: Compile LOG_PATTERNS as single regex
+        log_patterns = [
+            "[Tavily]", "[TTS Error]", "[Memory]", "[System]",
+            "[Router]", "[LLM]", "[Error]", "[Warning]",
+            "[Keywords]", "[Long-term Memory", "[Current]",
+            "FutureWarning:", "DeprecationWarning:",
+            "Permission denied", "Traceback",
+        ]
+        self._log_pattern = re.compile("|".join(re.escape(p) for p in log_patterns))
 
     def add_message(self, role: str, content: str, emotional_context: str = "neutral"):
         """Add a message to working memory with immediate SQL persistence.
@@ -121,9 +146,14 @@ class MemoryManager:
         Returns:
             TimestampedMessage or None if filtered
         """
-        if any(pattern in content for pattern in self.LOG_PATTERNS):
+        # PERF-028: Use single regex check instead of 14 substring scans
+        if self._log_pattern.search(content):
             _log.debug("Filtered log pattern from memory")
             return None
+
+        # Prompt defense: sanitize user input
+        if role == "user":
+            content = sanitize_input(content)
 
         with self._write_lock:
             msg = self.working.add(role, content, emotional_context)
@@ -156,7 +186,8 @@ class MemoryManager:
 
     def build_smart_context(
         self,
-        current_query: str
+        current_query: str,
+        channel_id: str = "default",
     ) -> str:
         """Build intelligent context from all memory sources.
 
@@ -178,6 +209,15 @@ class MemoryManager:
             result = asyncio.run(self._build_smart_context_async(current_query))
         dur_ms = int((time.monotonic() - t0) * 1000)
         _log.info("Context build done", sources=result.count("##"), dur_ms=dur_ms)
+
+        # Apply channel adaptation hint
+        channel_hint = get_channel_hint(channel_id)
+        if channel_hint:
+            result = f"## 채널 톤 가이드\n{channel_hint}\n\n{result}"
+
+        # Prompt defense: filter output
+        result = filter_output(result)
+
         return result
 
     def _build_smart_context_sync(self, current_query: str) -> str:
@@ -217,13 +257,13 @@ class MemoryManager:
                 if temporal_filter:
                     filter_type = temporal_filter.get("type")
                     if filter_type == "exact":
-                        from_date = temporal_filter.get("date")
+                        from_date = temporal_filter.get("date") or ""
                         session_context = self.session_archive.get_sessions_by_date(
-                            from_date, None, 5, self.SESSION_ARCHIVE_BUDGET
+                            from_date, "", 5, self.SESSION_ARCHIVE_BUDGET
                         )
                     elif filter_type == "range":
-                        from_date = temporal_filter.get("from")
-                        to_date = temporal_filter.get("to")
+                        from_date = temporal_filter.get("from") or ""
+                        to_date = temporal_filter.get("to") or ""
                         session_context = self.session_archive.get_sessions_by_date(
                             from_date, to_date, 10, self.SESSION_ARCHIVE_BUDGET
                         )
@@ -445,7 +485,11 @@ class MemoryManager:
                 messages=[m.to_dict() for m in messages]
             )
 
-            for fact in summary_result.get("facts_discovered", []):
+            # PERF-028: Batch fact and insight storage
+            facts = summary_result.get("facts_discovered", [])
+            insights = summary_result.get("insights_discovered", [])
+
+            for fact in facts:
                 self.long_term.add(
                     content=fact,
                     memory_type="fact",
@@ -453,7 +497,7 @@ class MemoryManager:
                     source_session=session_id
                 )
 
-            for insight in summary_result.get("insights_discovered", []):
+            for insight in insights:
                 self.long_term.add(
                     content=insight,
                     memory_type="insight",
@@ -559,14 +603,16 @@ class MemoryManager:
         Returns:
             Dict with results from working, sessions, and long_term
         """
-        results = {
+        results: Dict[str, list[Any]] = {
             "working": [],
             "sessions": [],
             "long_term": [],
         }
 
+        # PERF-028: Cache query_lower and access messages once
+        query_lower = query.lower()
         for msg in self.working.messages:
-            if query.lower() in msg.content.lower():
+            if query_lower in msg.content.lower():
                 results["working"].append({
                     "content": msg.content,
                     "timestamp": msg.timestamp.isoformat(),
@@ -580,7 +626,7 @@ class MemoryManager:
 
         return results
 
-    def migrate_legacy_data(self, old_db_path: str = None, dry_run: bool = True) -> Dict:
+    def migrate_legacy_data(self, old_db_path: Optional[str] = None, dry_run: bool = True) -> Dict:
         """Migrate data from old ChromaDB to new storage.
 
         Args:

@@ -10,11 +10,12 @@ from backend.core.logging.logging import get_logger
 _log = get_logger("mcp.memory_tools")
 
 async def _read_file_safe(path: Path) -> str:
-
+    """Read file asynchronously using asyncio.to_thread."""
+    import asyncio
     if not path.exists():
         return f"Error: File not found at {path}"
     try:
-        return path.read_text(encoding="utf-8")
+        return await asyncio.to_thread(path.read_text, encoding="utf-8")
     except Exception as e:
         return f"Error reading file: {str(e)}"
 

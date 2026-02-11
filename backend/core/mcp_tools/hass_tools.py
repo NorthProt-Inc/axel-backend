@@ -402,7 +402,7 @@ async def hass_execute_scene_tool(arguments: dict[str, Any]) -> Sequence[TextCon
             results.append(f"{status} {entity_id}")
 
         _log.info("TOOL ok", fn="hass_execute_scene", custom_cnt=len(results))
-        return [TextContent(type="text", text=f"Scene applied:\n" + "\n".join(results))]
+        return [TextContent(type="text", text="Scene applied:\n" + "\n".join(results))]
 
     except Exception as e:
         _log.error("TOOL fail", fn="hass_execute_scene", err=str(e)[:100])

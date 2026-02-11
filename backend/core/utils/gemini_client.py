@@ -103,12 +103,12 @@ async def gemini_embed(
 
     model = model or MemoryConfig.EMBEDDING_MODEL
 
-    embed_config: dict[str, Any] | None = None
+    embed_config: dict[str, Any] = {"output_dimensionality": 3072}
     if task_type:
-        embed_config = {"task_type": task_type}
+        embed_config["task_type"] = task_type
 
     return await client.aio.models.embed_content(
         model=model,
         contents=contents,
-        config=embed_config,
+        config=embed_config,  # type: ignore[arg-type]
     )

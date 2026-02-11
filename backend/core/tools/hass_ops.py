@@ -126,7 +126,7 @@ async def _hass_api_call(
     method: str,
     endpoint: str,
     payload: Optional[Dict] = None,
-    retries: int = None
+    retries: Optional[int] = None
 ) -> HASSResult:
     # Get config values at runtime to avoid circular import
     hass_timeout, hass_max_retries = _get_hass_config()
@@ -340,19 +340,14 @@ async def hass_control_all_lights(
 
     lights = get_lights()
     _log.info("HASS all lights", action=action, cnt=len(lights))
-    results = []
 
-    for i, light_id in enumerate(lights):
-        result = await hass_control_device(
-            light_id,
-            action,
-            brightness,
-            color
-        )
-        results.append(result)
+    sem = asyncio.Semaphore(5)
 
-        if i < len(lights) - 1:
-            await asyncio.sleep(0.05)
+    async def _control_one(light_id: str) -> HASSResult:
+        async with sem:
+            return await hass_control_device(light_id, action, brightness, color)
+
+    results = list(await asyncio.gather(*(_control_one(lid) for lid in lights)))
 
     success_count = sum(1 for r in results if r.success)
     total = len(lights)
@@ -375,7 +370,7 @@ async def hass_control_all_lights(
         _log.error("HASS all lights fail", action=action)
         return HASSResult(
             success=False,
-            message=f" Failed to control all lights",
+            message=" Failed to control all lights",
             error="All light control attempts failed",
             data={"controlled": 0, "total": total}
         )
@@ -479,6 +474,8 @@ async def _read_sensor_group(group_name: str) -> HASSResult:
 
     lines = []
     for s in sensors:
+        if s is None:
+            continue
         name = s.get("friendly_name", s.get("entity_id", "Unknown"))
         state = s.get("state", "?")
         unit = s.get("unit", "")
@@ -502,21 +499,22 @@ async def get_all_states(known_only: bool = False) -> HASSResult:
     result = await _hass_api_call("GET", "/api/states")
 
     if result.success and result.data:
+        states: list[Any] = result.data if isinstance(result.data, list) else []
         if known_only:
             known_entities = _get_device_config().known_entities
             filtered = [
-                state for state in result.data
-                if state.get("entity_id") in known_entities
+                state for state in states
+                if isinstance(state, dict) and state.get("entity_id") in known_entities
             ]
-            result.data = filtered
+            result.data = filtered  # type: ignore[assignment]
             result.message = f"Retrieved {len(filtered)} known entity states"
         else:
-            result.message = f"Retrieved {len(result.data)} entity states"
-        _log.debug("HASS all states ok", cnt=len(result.data))
+            result.message = f"Retrieved {len(states)} entity states"
+        _log.debug("HASS all states ok", cnt=len(states))
 
     return result
 
-async def hass_list_entities(domain: str = None) -> HASSResult:
+async def hass_list_entities(domain: Optional[str] = None) -> HASSResult:
 
     _log.debug("HASS list entities", domain=domain)
     result = await _hass_api_call("GET", "/api/states")
@@ -524,7 +522,7 @@ async def hass_list_entities(domain: str = None) -> HASSResult:
     if not result.success:
         return result
 
-    all_entities = result.data or []
+    all_entities: list[Any] = result.data if isinstance(result.data, list) else []
 
     if domain:
 
@@ -535,7 +533,7 @@ async def hass_list_entities(domain: str = None) -> HASSResult:
                 "state": e.get("state")
             }
             for e in all_entities
-            if e.get("entity_id", "").startswith(f"{domain}.")
+            if isinstance(e, dict) and e.get("entity_id", "").startswith(f"{domain}.")
         ]
         _log.debug("HASS entities ok", domain=domain, cnt=len(filtered))
         return HASSResult(
@@ -545,9 +543,9 @@ async def hass_list_entities(domain: str = None) -> HASSResult:
         )
     else:
 
-        domains = {}
+        domains: dict[str, int] = {}
         for e in all_entities:
-            entity_id = e.get("entity_id", "")
+            entity_id = e.get("entity_id", "") if isinstance(e, dict) else ""
             if "." in entity_id:
                 d = entity_id.split(".")[0]
                 domains[d] = domains.get(d, 0) + 1

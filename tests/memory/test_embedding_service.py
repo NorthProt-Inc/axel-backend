@@ -18,7 +18,7 @@ class TestEmbeddingService:
         result = service.get_embedding("Hello world")
 
         assert result is not None
-        assert len(result) == 768
+        assert len(result) == 3072
         mock_genai_client.models.embed_content.assert_called_once()
 
     def test_embedding_cache_hit(self, mock_genai_client):

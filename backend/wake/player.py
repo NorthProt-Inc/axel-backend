@@ -30,10 +30,12 @@ class AudioPlayer:
 
         try:
             _log.debug("play chime", name=sound_name)
+            # PERF-041: Remove capture_output since output is unused
             subprocess.run(
                 ["paplay", "--device", self.sink_name, sound_path],
                 check=False,
-                capture_output=True
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
             )
         except Exception as e:
             _log.error("aud play err", name=sound_name, err=str(e))

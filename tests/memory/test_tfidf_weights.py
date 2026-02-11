@@ -64,19 +64,19 @@ class TestRecalculateWeightsConvergence:
 
     def test_weights_in_valid_range(self, graph):
         """After recalculation, all weights are in [0, 1]."""
-        _add_entities(graph, ["A", "B", "C", "D"])
+        _add_entities(graph, ["Alpha", "Beta", "Gamma", "Delta"])
 
         rels = [
-            Relation(source_id="a", target_id="b", relation_type="r1"),
-            Relation(source_id="b", target_id="c", relation_type="r2"),
-            Relation(source_id="c", target_id="d", relation_type="r3"),
+            Relation(source_id="alpha", target_id="beta", relation_type="r1"),
+            Relation(source_id="beta", target_id="gamma", relation_type="r2"),
+            Relation(source_id="gamma", target_id="delta", relation_type="r3"),
         ]
         for r in rels:
             graph.add_relation(r)
 
         # Simulate repeated interactions
         for _ in range(5):
-            graph.add_relation(rels[0])  # A-B gets more co-occurrence
+            graph.add_relation(rels[0])  # Alpha-Beta gets more co-occurrence
 
         result = graph.recalculate_weights()
         assert result["total"] == 3

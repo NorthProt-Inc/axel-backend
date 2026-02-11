@@ -66,7 +66,7 @@ class SessionRepository:
         turn_count: int,
         started_at: datetime,
         ended_at: datetime,
-        messages: List[Dict] = None,
+        messages: Optional[List[Dict]] = None,
     ) -> bool:
         """Save session data with messages atomically."""
         expires_at = datetime.now(VANCOUVER_TZ) + timedelta(days=MESSAGE_EXPIRY_DAYS)
@@ -81,20 +81,24 @@ class SessionRepository:
                     row = cursor.fetchone()
                     base_turn_id = (row[0] if row[0] is not None else -1) + 1
 
-                    for i, msg in enumerate(messages):
-                        conn.execute(
-                            """INSERT OR IGNORE INTO messages
-                               (session_id, turn_id, role, content, timestamp, emotional_context)
-                               VALUES (?, ?, ?, ?, ?, ?)""",
-                            (
-                                session_id,
-                                base_turn_id + i,
-                                msg.get("role", "unknown"),
-                                msg.get("content", ""),
-                                msg.get("timestamp", datetime.now(VANCOUVER_TZ).isoformat()),
-                                msg.get("emotional_context", "neutral"),
-                            ),
+                    # PERF-023: Use executemany for batch insert
+                    message_data = [
+                        (
+                            session_id,
+                            base_turn_id + i,
+                            msg.get("role", "unknown"),
+                            msg.get("content", ""),
+                            msg.get("timestamp", datetime.now(VANCOUVER_TZ).isoformat()),
+                            msg.get("emotional_context", "neutral"),
                         )
+                        for i, msg in enumerate(messages)
+                    ]
+                    conn.executemany(
+                        """INSERT OR IGNORE INTO messages
+                           (session_id, turn_id, role, content, timestamp, emotional_context)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        message_data,
+                    )
 
                 conn.execute(
                     """INSERT OR REPLACE INTO sessions
@@ -189,7 +193,7 @@ class SessionRepository:
     def get_sessions_by_date(
         self,
         from_date: str,
-        to_date: str = None,
+        to_date: Optional[str] = None,
         limit: int = 10,
         max_tokens: int = 3000,
     ) -> str:
@@ -279,9 +283,8 @@ class SessionRepository:
                     parts.append(f"  {d}: {cnt}개")
                     char_count += 20
 
-            recent_msgs = sorted(
-                all_messages, key=lambda m: m.get("timestamp", ""), reverse=True
-            )[:20]
+            # PERF-024: DB already orders by timestamp DESC, no need to re-sort
+            recent_msgs = all_messages[:20]
             if recent_msgs:
                 parts.append("\n최근 대화:")
                 for msg in recent_msgs:
@@ -345,16 +348,19 @@ class SessionRepository:
         """Get session/message count statistics."""
         try:
             with self._conn_mgr.get_connection() as conn:
-                session_count = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-                message_count = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-                expired_count = conn.execute(
-                    "SELECT COUNT(*) FROM sessions WHERE expires_at < datetime('now')"
-                ).fetchone()[0]
+                # PERF-024: Combine 3 count queries into single query
+                result = conn.execute(
+                    """SELECT
+                        (SELECT COUNT(*) FROM sessions) as session_count,
+                        (SELECT COUNT(*) FROM messages) as message_count,
+                        (SELECT COUNT(*) FROM sessions WHERE expires_at < datetime('now')) as expired_count
+                    """
+                ).fetchone()
 
                 return {
-                    "total_sessions": session_count,
-                    "total_messages": message_count,
-                    "expired_pending_cleanup": expired_count,
+                    "total_sessions": result[0],
+                    "total_messages": result[1],
+                    "expired_pending_cleanup": result[2],
                     "expiry_days": MESSAGE_EXPIRY_DAYS,
                 }
         except Exception as e:
@@ -449,20 +455,24 @@ class SessionRepository:
     def archive_session(self, session_id: str, messages: List[Dict], summary: str):
         """Archive messages and update session summary atomically."""
         with self._conn_mgr.transaction() as conn:
-            for msg in messages:
-                conn.execute(
-                    """INSERT INTO archived_messages
-                       (session_id, turn_id, role, content, timestamp, emotional_context)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (
-                        session_id,
-                        msg["turn_id"],
-                        msg["role"],
-                        msg["content"],
-                        msg["timestamp"],
-                        msg["emotional_context"],
-                    ),
+            # PERF-023: Use executemany for batch insert
+            message_data = [
+                (
+                    session_id,
+                    msg["turn_id"],
+                    msg["role"],
+                    msg["content"],
+                    msg["timestamp"],
+                    msg["emotional_context"],
                 )
+                for msg in messages
+            ]
+            conn.executemany(
+                """INSERT INTO archived_messages
+                   (session_id, turn_id, role, content, timestamp, emotional_context)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                message_data,
+            )
             conn.execute(
                 "UPDATE sessions SET summary = ? WHERE session_id = ?",
                 (summary, session_id),

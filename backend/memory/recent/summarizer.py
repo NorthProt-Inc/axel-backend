@@ -16,7 +16,7 @@ class SessionSummarizer:
         repo: SessionRepository for data access.
     """
 
-    def __init__(self, repo: SessionRepository):
+    def __init__(self, repo: Any):
         self._repo = repo
 
     async def generate_summary(

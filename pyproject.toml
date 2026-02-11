@@ -31,6 +31,29 @@ filterwarnings = [
 line-length = 100
 target-version = ["py312"]
 
+[tool.coverage.run]
+source = ["backend"]
+branch = true
+omit = [
+    "backend/wake/*",
+    "backend/media/qwen_tts.py",
+    "backend/media/tts_service.py",
+    "backend/media/transcribe.py",
+    "backend/native/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 90
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__",
+    "raise NotImplementedError",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

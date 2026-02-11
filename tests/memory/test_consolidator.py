@@ -30,6 +30,7 @@ def mock_repository():
     }
     repo.delete.return_value = 0
     repo.update_metadata.return_value = True
+    repo.batch_update_metadata.side_effect = lambda ids, metas: len(ids)
     return repo
 
 
@@ -183,7 +184,7 @@ class TestMemoryConsolidator:
             report = consolidator.consolidate()
 
         assert report["preserved"] == 1
-        mock_repository.update_metadata.assert_called()
+        mock_repository.batch_update_metadata.assert_called()
 
     def test_consolidate_returns_stats(self, mock_repository):
         """consolidate should return proper statistics."""

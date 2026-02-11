@@ -314,7 +314,7 @@ HH:MM:SS.mmm LVL [MOD|submod     ] msg │ k=v k2=v2
 File logs use a more detailed timestamp without colors:
 
 ```
-2024-01-15 14:32:01.234 INFO    [abc12345│api.chat      ] Chat req recv │ sess=abc12345 mdl=gemini-3
+2026-02-10 14:32:01.234 INFO    [abc12345│api.chat      ] Chat req recv │ sess=abc12345 mdl=gemini-3
 ```
 
 ### JSON Log Format
@@ -322,7 +322,7 @@ File logs use a more detailed timestamp without colors:
 When `LOG_JSON=true`, logs are saved to `logs/axnmihn.jsonl` in JSONL format:
 
 ```json
-{"ts":"2024-01-15T14:32:01.234567-08:00","level":"INFO","logger":"api.chat","msg":"Chat req recv","req":"abc12345","sess":"abc12345","mdl":"gemini-2"}
+{"ts":"2026-02-10T14:32:01.234567-08:00","level":"INFO","logger":"api.chat","msg":"Chat req recv","req":"abc12345","sess":"abc12345","mdl":"gemini-3-flash"}
 ```
 
 ---
@@ -393,8 +393,17 @@ backend/
         └── logging.py     # Main logging module
 
 logs/
-├── axnmihn.log           # Plain text log (rotated)
-└── axnmihn.jsonl         # JSON log (when LOG_JSON=true)
+├── backend.log           # Backend plain text log (rotated, 10MB, 5 backups)
+├── backend_error.log     # Backend errors only
+├── mcp.log               # MCP server log
+├── mcp_error.log         # MCP errors only
+├── research.log          # Research MCP log
+├── research_error.log    # Research errors only
+├── tts.log               # TTS service log
+├── tts_error.log         # TTS errors only
+├── wakeword.log          # Wakeword service log
+├── wakeword_error.log    # Wakeword errors only
+└── night_ops.log         # Night shift automation log
 ```
 
 ---

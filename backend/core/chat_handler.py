@@ -293,7 +293,7 @@ class ChatHandler:
 
         # Add assistant message to memory and spawn persistence task
         if full_response:
-            self.persistence_service.add_assistant_message(full_response)
+            await self.persistence_service.add_assistant_message(full_response)
             self._spawn_task(
                 self.persistence_service.persist_all(user_input, full_response),
                 "memory_persist"

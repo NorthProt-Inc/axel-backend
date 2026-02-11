@@ -484,7 +484,7 @@ class ContextService:
                 content = get_source_code(file_path)
                 if content:
                     if len(content) > MAX_CODE_FILE_CHARS:
-                        content = content[:MAX_CODE_FILE_CHARS] + f"\n... (truncated)"
+                        content = content[:MAX_CODE_FILE_CHARS] + "\n... (truncated)"
                     code_files_content += f"\n##  {file_path}\n```python\n{content}\n```"
                     injected_files.append(file_path)
 

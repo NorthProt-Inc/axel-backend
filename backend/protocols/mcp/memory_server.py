@@ -1,24 +1,41 @@
 import sys
+import asyncio  # PERF-043: Module-level import instead of inside function
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 
 AXEL_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(AXEL_ROOT))
+# PERF-041: Check before inserting to avoid duplicates
+if str(AXEL_ROOT) not in sys.path:
+    sys.path.insert(0, str(AXEL_ROOT))
 
 from backend.core.logging import get_logger
 
 _log = get_logger("protocols.memory")
 
-def _get_memory_components():
-    """Get memory components directly from AppState (no caching)."""
-    from backend.api.deps import get_state
+# PERF-043: Cache memory components after first retrieval
+_memory_components_cache: Optional[Tuple] = None
+_memory_components_cache_mm_id: Optional[int] = None
 
+def _get_memory_components():
+    """Get memory components from AppState with caching."""
+    global _memory_components_cache, _memory_components_cache_mm_id
+
+    from backend.api.deps import get_state
     state = get_state()
     mm = state.memory_manager
+
+    # Invalidate cache if memory_manager instance changed
+    if _memory_components_cache is not None and id(mm) == _memory_components_cache_mm_id:
+        return _memory_components_cache
+
     ltm = state.long_term_memory
     sa = mm.session_archive if mm else None
     gr = mm.graph_rag if mm else None
-    return mm, ltm, sa, gr
+
+    _memory_components_cache = (mm, ltm, sa, gr)
+    _memory_components_cache_mm_id = id(mm)
+    return _memory_components_cache
 
 async def store_memory(
     content: str,
@@ -44,7 +61,7 @@ async def store_memory(
             content=content,
             memory_type=category,
             importance=importance,
-            source_session="mcp_tool"
+            source_session=None
         )
 
         _log.info(
@@ -112,7 +129,9 @@ async def retrieve_context(
 
                     timestamp = meta.get("event_timestamp") or meta.get("created_at") or ""
 
-                    formatted_dt, temporal_label = _format_temporal_label(timestamp)
+                    # PERF-031: Parse timestamp once and reuse
+                    parsed_time = _parse_timestamp(timestamp)
+                    formatted_dt, temporal_label = _format_temporal_label_from_dt(parsed_time)
 
                     content_preview = content[:250].replace("\n", " ").strip()
                     if len(content) > 250:
@@ -129,7 +148,7 @@ async def retrieve_context(
 
     if graph_rag:
         try:
-            import asyncio
+            # PERF-043: asyncio imported at module level
             graph_result = await asyncio.to_thread(graph_rag.query_sync, query)
             if graph_result and graph_result.context:
                 metadata["graph_entities"] = len(graph_result.entities)
@@ -171,14 +190,21 @@ def _parse_timestamp(timestamp_str: str):
     Returns:
         datetime object with UTC timezone, or None if parsing fails
     """
-    from datetime import datetime, timezone
-
     if not timestamp_str:
         return None
 
-    formats = ['%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%dT%H:%M:%S.%f%z', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']
+    # PERF-031: Try fromisoformat first (C-implemented fast path in Python 3.11+)
     timestamp_str = timestamp_str.replace('Z', '+00:00')
+    try:
+        parsed = datetime.fromisoformat(timestamp_str)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        pass
 
+    # Fallback to strptime for non-ISO formats
+    formats = ['%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%dT%H:%M:%S.%f%z', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']
     for fmt in formats:
         try:
             parsed = datetime.strptime(timestamp_str, fmt)
@@ -188,26 +214,11 @@ def _parse_timestamp(timestamp_str: str):
         except ValueError:
             continue
 
-    # fromisoformat도 시도 (Python 3.11+에서 더 유연함)
-    try:
-        parsed = datetime.fromisoformat(timestamp_str)
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed
-    except ValueError:
-        pass
-
     _log.debug("Unparseable timestamp", timestamp=timestamp_str[:30])
     return None
 
-def _format_temporal_label(timestamp_str: str) -> tuple[str, str]:
-
-    from datetime import datetime, timezone
-
-    if not timestamp_str:
-        return ("unknown", "OLD")
-
-    mem_time = _parse_timestamp(timestamp_str)
+def _format_temporal_label_from_dt(mem_time: datetime | None) -> tuple[str, str]:
+    """Format temporal label from already-parsed datetime (PERF-031)."""
     if not mem_time:
         return ("unknown", "OLD")
 
@@ -225,50 +236,44 @@ def _format_temporal_label(timestamp_str: str) -> tuple[str, str]:
 
         return (formatted_dt, label)
     except Exception as e:
-        _log.debug("Temporal label calculation failed", timestamp=timestamp_str[:30], error=str(e))
+        _log.debug("Temporal label calculation failed", error=str(e))
         return ("unknown", "OLD")
 
-def _format_memory_age(timestamp_str: str) -> str:
-    """Format memory age as human-readable relative time.
-
-    Args:
-        timestamp_str: ISO timestamp string
-
-    Returns:
-        Relative time string (e.g., '2h ago', 'yesterday', '3d ago')
-    """
-    from datetime import datetime, timezone
-
-    if not timestamp_str:
-        return ""
-
+def _format_temporal_label(timestamp_str: str) -> tuple[str, str]:
+    """Format temporal label (legacy wrapper for compatibility)."""
     mem_time = _parse_timestamp(timestamp_str)
-    if not mem_time:
-        return ""
+    return _format_temporal_label_from_dt(mem_time)
 
+def _format_memory_age(timestamp_str: str) -> str:
+    """Return a human-readable relative age string for a memory timestamp."""
+    if not timestamp_str or not timestamp_str.strip():
+        return ""
+    mem_time = _parse_timestamp(timestamp_str)
+    if mem_time is None:
+        return ""
     try:
         now_time = datetime.now(timezone.utc)
         delta = now_time - mem_time
-
-        hours = delta.total_seconds() / 3600
-        days = delta.days
+        total_seconds = delta.total_seconds()
+        hours = total_seconds / 3600
+        days = total_seconds / 86400
 
         if hours < 1:
             return "just now"
-        elif hours < 24:
+        if hours < 24:
             return f"{int(hours)}h ago"
-        elif days == 1:
+        if days < 2:
             return "yesterday"
-        elif days < 7:
-            return f"{days}d ago"
-        elif days < 30:
-            return f"{days // 7}w ago"
-        elif days < 365:
-            return f"{days // 30}mo ago"
-        else:
-            return mem_time.strftime("%Y-%m-%d")
-    except Exception as e:
-        _log.debug("Memory age formatting failed", timestamp=timestamp_str[:30], error=str(e))
+        if days < 7:
+            return f"{int(days)}d ago"
+        weeks = days / 7
+        if weeks < 5:
+            return f"{int(weeks)}w ago"
+        months = days / 30
+        if months < 12:
+            return f"{int(months)}mo ago"
+        return mem_time.strftime("%Y-%m-%d")
+    except Exception:
         return ""
 
 async def get_recent_logs(limit: int = 50) -> Dict[str, Any]:
@@ -306,7 +311,7 @@ async def get_recent_logs(limit: int = 50) -> Dict[str, Any]:
         _log.info(
             "RES complete",
             tool="get_recent_logs",
-            summaries_len=len(result["session_summaries"]),
+            summaries_len=len(str(result["session_summaries"])),
             interactions=result["interaction_count"]
         )
 

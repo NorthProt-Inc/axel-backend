@@ -1,5 +1,5 @@
 import os
-import numpy as np
+import numpy as np  # PERF-041: Module-level import
 import pyaudio
 from openwakeword.model import Model
 from backend.core.logging import get_logger
@@ -49,8 +49,7 @@ class WakewordDetector:
         _log.info("det strm stopped")
 
     def reset(self):
-
-        import numpy as np
+        # PERF-041: numpy imported at module level
         silence = np.zeros(self.owwModel.model_inputs[0].shape[-1], dtype=np.int16)
         for _ in range(5):
             self.owwModel.predict(silence)

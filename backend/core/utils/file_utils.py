@@ -57,18 +57,22 @@ def cleanup_orphaned_tmp_files(dir_path: Path) -> int:
 async def startup_cleanup(data_dirs: List[Path]) -> int:
 
     from backend.core.utils.async_utils import bounded_to_thread
+    import asyncio
 
-    total = 0
-    for dir_path in data_dirs:
+    # PERF-040: Use asyncio.gather for parallel cleanup
+    async def cleanup_one(dir_path: Path) -> int:
         try:
-            count = await bounded_to_thread(
+            return await bounded_to_thread(
                 cleanup_orphaned_tmp_files,
                 dir_path,
                 timeout_seconds=10.0
             )
-            total += count
         except Exception:
             _logger.exception("Startup cleanup error", path=str(dir_path))
+            return 0
+
+    results = await asyncio.gather(*[cleanup_one(d) for d in data_dirs])
+    total = sum(results)
 
     if total > 0:
         _logger.info("Startup cleanup complete", deleted_count=total)

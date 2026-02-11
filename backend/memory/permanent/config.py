@@ -2,6 +2,7 @@
 
 from backend.config import (
     EMBEDDING_MODEL,
+    EMBEDDING_DIMENSION,
     MEMORY_BASE_DECAY_RATE,
     MEMORY_MIN_RETENTION,
     MEMORY_DECAY_DELETE_THRESHOLD,
@@ -38,5 +39,6 @@ class MemoryConfig:
     # Channel diversity factor (T-02: axel port)
     CHANNEL_DIVERSITY_K = 0.2
 
-    # Embedding cache settings
+    # Embedding settings
+    EMBEDDING_DIMENSION = EMBEDDING_DIMENSION
     EMBEDDING_CACHE_SIZE = 256

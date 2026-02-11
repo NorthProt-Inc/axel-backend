@@ -72,7 +72,7 @@ graph TB
         end
 
         subgraph MCP["MCP Server (:8555)"]
-            MCPTools["Tool Registry<br/>(12 categories)"]
+            MCPTools["Tool Registry<br/>(32 tools)"]
         end
 
         subgraph Media["Media Pipeline"]
@@ -734,7 +734,7 @@ graph TB
         end
 
         subgraph MCP["MCP 서버 (:8555)"]
-            MCPTools["도구 레지스트리<br/>(12개 카테고리)"]
+            MCPTools["도구 레지스트리<br/>(32개 도구)"]
         end
 
         subgraph Media["미디어 파이프라인"]

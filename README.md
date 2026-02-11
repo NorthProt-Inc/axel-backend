@@ -84,7 +84,8 @@ graph TB
     subgraph External["🔌 External Services"]
         HASS["Home Assistant<br/>(WiZ/IoT)"]
         Playwright["Playwright<br/>(Browser)"]
-        Research["Research<br/>(Tavily + DDG)"]
+        TavilyAPI["Tavily API"]
+        DDGAPI["DuckDuckGo API"]
         PG["PostgreSQL"]
         Redis["Redis"]
     end
@@ -109,11 +110,15 @@ graph TB
 
     MCPTools --> HASS
     MCPTools --> Playwright
-    MCPTools --> Research
+    Search --> TavilyAPI
+    Search --> DDGAPI
 
     M3 & M4 & M52 --> PG
     M0 --> M1 --> M3 -->|"consolidation (6h)"| M4
+    M1 -->|"auto-promote"| M4
     M4 --> M51 & M52 & M53
+    M52 -->|"feedback"| M4
+    M53 -->|"hot boost"| M4
 ```
 
 ### Request Flow
@@ -132,7 +137,7 @@ sequenceDiagram
     C->>A: Message (REST/WebSocket/Bot)
     A->>CH: ChatRequest
     CH->>CS: build_smart_context()
-    CS->>MM: parallel fetch (M1+M3+M4+M5)
+    CS->>MM: parallel fetch (M0+M1+M3+M4+M5)
     MM-->>CS: budgeted context
     CS-->>CH: assembled context
 
@@ -147,6 +152,11 @@ sequenceDiagram
     end
 
     CH->>MM: persist (working + session + long-term)
+    MM->>LLM: evaluate importance (facts/insights)
+    LLM-->>MM: importance scores
+    opt importance ≥ 0.6
+        MM->>MM: auto-promote to M4
+    end
     CH-->>A: streaming response (SSE)
     A-->>C: chunked response
 ```
@@ -169,7 +179,7 @@ sequenceDiagram
 
 ## 6-Layer Memory System
 
-The memory system consists of 6 functional layers (M0, M1, M3, M4, M5.1-5.3) orchestrated by `MemoryManager` (`backend/memory/unified.py`).
+The memory system consists of 6 functional layers (M0, M1, M3, M4, M5.1-5.3) orchestrated by `MemoryManager` (`backend/memory/unified/`).
 
 ```mermaid
 graph TB
@@ -188,12 +198,15 @@ graph TB
 
     M0 --> M1
     M1 -->|"immediate persist"| M3
-    M3 -->|"consolidation (6h)"| M4
+    M1 -->|"auto-promote<br/>(importance ≥ 0.6)"| M4
+    M3 -->|"consolidation (6h)<br/>+ reassessment"| M4
     M4 --> M51
     M4 --> M52
     M4 --> M53
+    M52 -->|"connection_count<br/>feedback"| M4
+    M53 -->|"hot boost"| M4
 
-    Context["ContextService<br/>build_smart_context()"] -.->|"parallel fetch"| M1 & M3 & M4 & M51 & M52 & M53
+    Context["ContextService<br/>build_smart_context()"] -.->|"parallel fetch"| M0 & M1 & M3 & M4 & M51 & M52 & M53
 ```
 
 ### Layer Details
@@ -220,13 +233,27 @@ decay_factor = f(
     base_rate=0.001,        # configurable via MEMORY_BASE_DECAY_RATE
     access_count,           # repeated access slows decay
     connection_count,       # graph-connected memories resist decay
-    memory_type_modifier    # facts decay slower than conversations
+    memory_type_modifier,   # facts decay slower than conversations
+    circadian_stability     # peak-hour boost via apply_circadian_stability()
 )
 
 deletion threshold: 0.03   (MEMORY_DECAY_DELETE_THRESHOLD)
 min retention: 0.3         (MEMORY_MIN_RETENTION)
 similarity dedup: 0.90     (MEMORY_SIMILARITY_THRESHOLD)
 ```
+
+### Retrieval Scoring
+
+Long-term memory retrieval applies a multi-factor scoring pipeline:
+
+```
+effective_score = base_relevance * decay_factor * importance_weight
+
+importance_weight = 0.5 + 0.5 * clamp(importance, 0, 1)   # range: [0.5, 1.0]
+```
+
+- **M5 Hot Memory Boost**: Memories flagged as "hot" by MetaMemory receive a score bonus (+0.1)
+- **GraphRAG LLM Relevance**: Async queries use LLM-evaluated relevance instead of simple entity-count heuristics
 
 ### Context Assembly
 
@@ -241,15 +268,23 @@ similarity dedup: 0.90     (MEMORY_SIMILARITY_THRESHOLD)
 | GraphRAG | 12,000 | `BUDGET_GRAPHRAG` |
 | Session Archive | 8,000 | `BUDGET_SESSION_ARCHIVE` |
 
+`ContextService` also fetches M0 (Event Buffer) and M5 (Hot Memories) sections for complete 6-layer coverage.
+
 ### Session Management
 
 - **Auto session timeout**: Sessions automatically end after 30 minutes of inactivity
 - **Shutdown LLM summary**: On app shutdown, attempts LLM-based session summary (10s timeout, fallback on failure)
+- **LLM importance evaluation**: Facts and insights are scored by LLM at session end (fallback: 0.5)
+- **Auto-promotion (M2→M3)**: Sessions with LLM importance ≥ 0.6 are automatically promoted to long-term as `conversation` type
 - **Memory promotion criteria**: importance ≥ 0.55, or (repetitions ≥ 2 AND importance ≥ 0.35)
 
 ### Auto Consolidation
 
 The app runs `consolidate_memories()` automatically every 6 hours. Additionally, `scripts/memory_gc.py` can be registered as a cron job for hash/semantic deduplication.
+
+- **User behavior metrics**: Consolidator collects real user behavior metrics via `collect_behavior_metrics()` for adaptive decay
+- **Importance reassessment**: Old memories (>168h) with high access counts are periodically re-evaluated by LLM (batch size: 50)
+- **GraphRAG → M3 feedback**: Entity extraction updates `connection_count` on related long-term memories
 
 ### PostgreSQL Backend (Optional)
 
@@ -339,12 +374,12 @@ All endpoints require `Authorization: Bearer <token>` or `X-API-Key` header auth
 
 ## MCP Ecosystem
 
-36 tools served via SSE transport. Categories:
+32 tools served via SSE transport. Categories:
 
 - **System (9):** run_command, search_codebase, search_codebase_regex, read_system_logs, list_available_logs, analyze_log_errors, check_task_status, tool_metrics, system_status
 - **Memory (6):** query_axel_memory, add_memory, store_memory, retrieve_context, get_recent_logs, memory_stats
 - **File (3):** read_file, list_directory, get_source_code
-- **Research (7):** web_search, visit_webpage, deep_research, tavily_search, read_artifact, list_artifacts
+- **Research (6):** web_search, visit_webpage, deep_research, tavily_search, read_artifact, list_artifacts
 - **Home Assistant (6):** hass_control_light, hass_control_device, hass_read_sensor, hass_get_state, hass_list_entities, hass_execute_scene
 - **Delegation (2):** delegate_to_opus, google_deep_research
 
@@ -398,6 +433,7 @@ EMBEDDING_DIMENSION=3072
 # Server
 HOST=0.0.0.0
 PORT=8000
+DEBUG=false
 AXNMIHN_API_KEY=                    # API authentication
 TZ=America/Vancouver
 
@@ -429,6 +465,13 @@ CONTEXT_MAX_CHARS=500000
 # TTS
 TTS_SERVICE_URL=http://127.0.0.1:8002
 TTS_SYNTHESIS_TIMEOUT=30.0
+TTS_FFMPEG_TIMEOUT=10.0
+TTS_QUEUE_MAX_PENDING=3
+TTS_IDLE_TIMEOUT=300
+
+# Providers
+DEFAULT_LLM_PROVIDER=gemini
+SEARCH_PROVIDER=tavily
 
 # Channel Adapters (optional — auto-start when token is set)
 DISCORD_BOT_TOKEN=
@@ -440,6 +483,9 @@ TELEGRAM_ALLOWED_CHATS=
 # Home Assistant
 HASS_URL=http://homeassistant.local:8123
 HASS_TOKEN=
+
+# Admin
+AXNMIHN_ADMIN_EMAIL=admin@example.com
 ```
 
 ---
@@ -560,16 +606,14 @@ axnmihn/
 │   │   ├── logging/             # Structured logging
 │   │   ├── mcp_tools/           # Tool implementations
 │   │   ├── persona/             # Channel adaptation
-│   │   ├── resilience/          # Circuit breaker, fallback
 │   │   ├── security/            # Prompt defense
 │   │   ├── session/             # Session state
 │   │   ├── telemetry/           # Interaction logging
-│   │   └── utils/               # Cache, retry, HTTP pool, Gemini client
+│   │   └── utils/               # Cache, retry, HTTP pool, Gemini client, circuit breaker
 │   ├── llm/                     # LLM providers (Gemini, Anthropic)
 │   ├── media/                   # TTS manager
 │   ├── memory/                  # 6-layer memory system
-│   │   ├── unified.py           # MemoryManager orchestrator
-│   │   ├── unified/             # Unified context builder, session management
+│   │   ├── unified/             # MemoryManager orchestrator (core, facade, context_builder, session)
 │   │   ├── event_buffer.py      # M0: Event buffer
 │   │   ├── current.py           # M1: Working memory
 │   │   ├── recent/              # M3: Session archive (SQLite)
@@ -746,7 +790,8 @@ graph TB
     subgraph External["🔌 외부 서비스"]
         HASS["Home Assistant<br/>(WiZ/IoT)"]
         Playwright["Playwright<br/>(브라우저)"]
-        Research["리서치<br/>(Tavily + DDG)"]
+        TavilyAPI["Tavily API"]
+        DDGAPI["DuckDuckGo API"]
         PG["PostgreSQL"]
         Redis["Redis"]
     end
@@ -771,11 +816,15 @@ graph TB
 
     MCPTools --> HASS
     MCPTools --> Playwright
-    MCPTools --> Research
+    Search --> TavilyAPI
+    Search --> DDGAPI
 
     M3 & M4 & M52 --> PG
     M0 --> M1 --> M3 -->|"통합 (6시간)"| M4
+    M1 -->|"자동 프로모션"| M4
     M4 --> M51 & M52 & M53
+    M52 -->|"피드백"| M4
+    M53 -->|"핫 부스트"| M4
 ```
 
 ### 요청 흐름
@@ -794,7 +843,7 @@ sequenceDiagram
     C->>A: 메시지 (REST/WebSocket/봇)
     A->>CH: ChatRequest
     CH->>CS: build_smart_context()
-    CS->>MM: 병렬 조회 (M1+M3+M4+M5)
+    CS->>MM: 병렬 조회 (M0+M1+M3+M4+M5)
     MM-->>CS: 예산 기반 컨텍스트
     CS-->>CH: 조립된 컨텍스트
 
@@ -809,6 +858,11 @@ sequenceDiagram
     end
 
     CH->>MM: 영속화 (working + session + long-term)
+    MM->>LLM: 중요도 평가 (facts/insights)
+    LLM-->>MM: importance 점수
+    opt importance ≥ 0.6
+        MM->>MM: M4로 자동 프로모션
+    end
     CH-->>A: 스트리밍 응답 (SSE)
     A-->>C: 청크 응답
 ```
@@ -832,7 +886,7 @@ sequenceDiagram
 
 ## 6계층 메모리 시스템
 
-메모리 시스템은 6개의 기능 계층 (M0, M1, M3, M4, M5.1-5.3)으로 구성되며 `MemoryManager`(`backend/memory/unified.py`)가 오케스트레이션합니다.
+메모리 시스템은 6개의 기능 계층 (M0, M1, M3, M4, M5.1-5.3)으로 구성되며 `MemoryManager`(`backend/memory/unified/`)가 오케스트레이션합니다.
 
 ```mermaid
 graph TB
@@ -851,12 +905,15 @@ graph TB
 
     M0 --> M1
     M1 -->|"즉시 영속화"| M3
-    M3 -->|"통합 (6시간)"| M4
+    M1 -->|"자동 프로모션<br/>(importance ≥ 0.6)"| M4
+    M3 -->|"통합 (6시간)<br/>+ 재평가"| M4
     M4 --> M51
     M4 --> M52
     M4 --> M53
+    M52 -->|"connection_count<br/>피드백"| M4
+    M53 -->|"핫 부스트"| M4
 
-    Context["ContextService<br/>build_smart_context()"] -.->|"병렬 조회"| M1 & M3 & M4 & M51 & M52 & M53
+    Context["ContextService<br/>build_smart_context()"] -.->|"병렬 조회"| M0 & M1 & M3 & M4 & M51 & M52 & M53
 ```
 
 ### 계층 상세
@@ -883,13 +940,27 @@ decay_factor = f(
     base_rate=0.001,        # MEMORY_BASE_DECAY_RATE로 설정
     access_count,           # 반복 접근 시 decay 둔화
     connection_count,       # 그래프 연결된 메모리는 decay 저항
-    memory_type_modifier    # 사실은 대화보다 천천히 decay
+    memory_type_modifier,   # 사실은 대화보다 천천히 decay
+    circadian_stability     # 피크 시간대 부스트 (apply_circadian_stability())
 )
 
 삭제 임계값: 0.03   (MEMORY_DECAY_DELETE_THRESHOLD)
 최소 보존: 0.3      (MEMORY_MIN_RETENTION)
 유사도 중복 제거: 0.90  (MEMORY_SIMILARITY_THRESHOLD)
 ```
+
+### 검색 스코어링
+
+장기 메모리 검색은 다단계 스코어링 파이프라인을 적용합니다:
+
+```
+effective_score = base_relevance * decay_factor * importance_weight
+
+importance_weight = 0.5 + 0.5 * clamp(importance, 0, 1)   # 범위: [0.5, 1.0]
+```
+
+- **M5 Hot Memory 부스트**: MetaMemory가 "hot"으로 표시한 메모리에 스코어 보너스 (+0.1) 적용
+- **GraphRAG LLM 관련성**: 비동기 쿼리에서 엔티티 수 기반 단순 계산 대신 LLM 관련성 평가 사용
 
 ### 컨텍스트 조립
 
@@ -904,15 +975,23 @@ decay_factor = f(
 | GraphRAG | 12,000 | `BUDGET_GRAPHRAG` |
 | 세션 아카이브 | 8,000 | `BUDGET_SESSION_ARCHIVE` |
 
+`ContextService`는 M0(이벤트 버퍼)과 M5(Hot 메모리) 섹션도 조회하여 완전한 6계층 커버리지를 제공합니다.
+
 ### 세션 관리
 
 - **자동 세션 타임아웃**: 30분 비활성 시 현재 세션을 자동 종료하고 새 세션 시작
 - **앱 종료 시 LLM 요약**: 종료 시 LLM 기반 세션 요약 시도 (10초 타임아웃, 실패 시 fallback)
+- **LLM 중요도 평가**: 세션 종료 시 facts/insights를 LLM으로 중요도 평가 (fallback: 0.5)
+- **자동 프로모션 (M2→M3)**: LLM 중요도 ≥ 0.6인 세션은 자동으로 `conversation` 타입 장기 메모리로 승격
 - **메모리 승격 기준**: importance ≥ 0.55 또는 (repetitions ≥ 2 AND importance ≥ 0.35)
 
 ### 자동 Consolidation
 
 앱 내에서 6시간마다 자동으로 `consolidate_memories()` 실행. 별도로 `scripts/memory_gc.py`를 cron에 등록하여 해시/시맨틱 중복 제거도 수행합니다.
+
+- **사용자 행동 메트릭**: Consolidator가 `collect_behavior_metrics()`로 실제 사용자 행동 메트릭을 수집하여 적응형 decay에 활용
+- **중요도 재평가**: 오래된 메모리(>168시간) 중 접근 횟수가 높은 항목을 주기적으로 LLM 재평가 (배치 크기: 50)
+- **GraphRAG → M3 피드백**: 엔티티 추출 시 관련 장기 메모리의 `connection_count`를 자동 업데이트
 
 ### PostgreSQL 백엔드 (선택)
 
@@ -1009,12 +1088,12 @@ backend/memory/pg/
 
 ## MCP 생태계
 
-SSE 전송을 통해 제공되는 36개 도구. 카테고리:
+SSE 전송을 통해 제공되는 32개 도구. 카테고리:
 
 - **System (9):** run_command, search_codebase, search_codebase_regex, read_system_logs, list_available_logs, analyze_log_errors, check_task_status, tool_metrics, system_status
 - **Memory (6):** query_axel_memory, add_memory, store_memory, retrieve_context, get_recent_logs, memory_stats
 - **File (3):** read_file, list_directory, get_source_code
-- **Research (7):** web_search, visit_webpage, deep_research, tavily_search, read_artifact, list_artifacts
+- **Research (6):** web_search, visit_webpage, deep_research, tavily_search, read_artifact, list_artifacts
 - **Home Assistant (6):** hass_control_light, hass_control_device, hass_read_sensor, hass_get_state, hass_list_entities, hass_execute_scene
 - **Delegation (2):** delegate_to_opus, google_deep_research
 
@@ -1068,6 +1147,7 @@ EMBEDDING_DIMENSION=3072
 # 서버
 HOST=0.0.0.0
 PORT=8000
+DEBUG=false
 AXNMIHN_API_KEY=                    # API 인증
 TZ=America/Vancouver
 
@@ -1099,6 +1179,13 @@ CONTEXT_MAX_CHARS=500000
 # TTS
 TTS_SERVICE_URL=http://127.0.0.1:8002
 TTS_SYNTHESIS_TIMEOUT=30.0
+TTS_FFMPEG_TIMEOUT=10.0
+TTS_QUEUE_MAX_PENDING=3
+TTS_IDLE_TIMEOUT=300
+
+# 프로바이더
+DEFAULT_LLM_PROVIDER=gemini
+SEARCH_PROVIDER=tavily
 
 # 채널 어댑터 (선택 — 토큰 설정 시 자동 시작)
 DISCORD_BOT_TOKEN=
@@ -1110,6 +1197,9 @@ TELEGRAM_ALLOWED_CHATS=
 # Home Assistant
 HASS_URL=http://homeassistant.local:8123
 HASS_TOKEN=
+
+# 관리자
+AXNMIHN_ADMIN_EMAIL=admin@example.com
 ```
 
 ---
@@ -1234,16 +1324,14 @@ axnmihn/
 │   │   ├── logging/             # 구조화된 로깅
 │   │   ├── mcp_tools/           # 도구 구현
 │   │   ├── persona/             # 채널 적응
-│   │   ├── resilience/          # Circuit breaker, 폴백
 │   │   ├── security/            # 프롬프트 방어
 │   │   ├── session/             # 세션 상태
 │   │   ├── telemetry/           # 상호작용 로깅
-│   │   └── utils/               # 캐시, 재시도, HTTP 풀, Gemini 클라이언트
+│   │   └── utils/               # 캐시, 재시도, HTTP 풀, Gemini 클라이언트, circuit breaker
 │   ├── llm/                     # LLM 프로바이더 (Gemini, Anthropic)
 │   ├── media/                   # TTS 관리자
 │   ├── memory/                  # 6계층 메모리 시스템
-│   │   ├── unified.py           # MemoryManager 오케스트레이터
-│   │   ├── unified/             # 통합 컨텍스트 빌더, 세션 관리
+│   │   ├── unified/             # MemoryManager 오케스트레이터 (core, facade, context_builder, session)
 │   │   ├── event_buffer.py      # M0: 이벤트 버퍼
 │   │   ├── current.py           # M1: 워킹 메모리
 │   │   ├── recent/              # M3: 세션 아카이브 (SQLite)

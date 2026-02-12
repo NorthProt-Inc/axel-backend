@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
-from backend.config import MODEL_NAME, ANTHROPIC_CHAT_MODEL
+from backend.config import GEMINI_MODEL, ANTHROPIC_MODEL, CHAT_PROVIDER
 
 load_dotenv()
 
@@ -34,7 +34,7 @@ class LLMProvider:
 LLM_PROVIDERS: Dict[str, LLMProvider] = {
     "google": LLMProvider(
         name="Gemini 3 Flash",
-        model=MODEL_NAME,
+        model=GEMINI_MODEL,
         provider="google",
         api_key_env="GEMINI_API_KEY",
         icon="",
@@ -42,7 +42,7 @@ LLM_PROVIDERS: Dict[str, LLMProvider] = {
     ),
     "anthropic": LLMProvider(
         name="Claude Sonnet 4.5",
-        model=ANTHROPIC_CHAT_MODEL,
+        model=ANTHROPIC_MODEL,
         provider="anthropic",
         api_key_env="ANTHROPIC_API_KEY",
         icon="",
@@ -50,7 +50,7 @@ LLM_PROVIDERS: Dict[str, LLMProvider] = {
     ),
 }
 
-DEFAULT_PROVIDER = "anthropic"
+DEFAULT_PROVIDER = CHAT_PROVIDER
 
 
 def get_provider(name: str) -> LLMProvider:

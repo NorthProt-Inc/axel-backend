@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from backend.config import MESSAGE_SUMMARY_MODEL
+from backend.config import UTILITY_MODEL
 from backend.core.logging import get_logger
 
 _log = get_logger("memory.recent.summarizer")
@@ -60,7 +60,7 @@ class SessionSummarizer:
             else:
                 from backend.llm import get_llm_client
 
-                llm = get_llm_client("gemini", MESSAGE_SUMMARY_MODEL)
+                llm = get_llm_client("google", UTILITY_MODEL)
                 response = await llm.generate(prompt, max_tokens=300)
 
             if response:

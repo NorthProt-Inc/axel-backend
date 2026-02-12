@@ -8,7 +8,7 @@ import json as json_mod
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from backend.config import ANTHROPIC_CHAT_MODEL, ANTHROPIC_THINKING_BUDGET, STREAM_MAX_RETRIES
+from backend.config import ANTHROPIC_MODEL, ANTHROPIC_THINKING_BUDGET, STREAM_MAX_RETRIES
 from backend.core.logging import get_logger
 from backend.core.logging.error_monitor import error_monitor
 from backend.core.utils.retry import RetryConfig, classify_error, retry_async_generator
@@ -34,9 +34,9 @@ class AnthropicClient(BaseLLMClient):
         """Initialize Anthropic client.
 
         Args:
-            model: Model name (defaults to ANTHROPIC_CHAT_MODEL from config)
+            model: Model name (defaults to ANTHROPIC_MODEL from config)
         """
-        model = model or ANTHROPIC_CHAT_MODEL
+        model = model or ANTHROPIC_MODEL
         _log.debug("anthropic client init", model=model)
         import anthropic
         self._client = anthropic.AsyncAnthropic()
@@ -54,7 +54,6 @@ class AnthropicClient(BaseLLMClient):
         enable_thinking: bool = False,
         thinking_level: str = "high",
         tools: Optional[List[Dict]] = None,
-        force_tool_call: bool = False,
     ) -> AsyncGenerator[tuple, None]:
         """Generate a streaming response from Anthropic Claude.
 
@@ -67,7 +66,6 @@ class AnthropicClient(BaseLLMClient):
             enable_thinking: Whether to enable extended thinking
             thinking_level: Level of thinking (currently unused by Anthropic API)
             tools: Optional tool definitions
-            force_tool_call: Whether to force tool call
 
         Yields:
             Tuples of (text_chunk, is_thought, function_call)
@@ -110,13 +108,13 @@ class AnthropicClient(BaseLLMClient):
             "messages": messages,
         }
 
-        # System prompt with prompt caching
+        # System prompt with prompt caching (1h TTL)
         if system_prompt:
             kwargs["system"] = [
                 {
                     "type": "text",
                     "text": system_prompt,
-                    "cache_control": {"type": "ephemeral"},
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"},
                 }
             ]
 
@@ -133,16 +131,13 @@ class AnthropicClient(BaseLLMClient):
         else:
             kwargs["temperature"] = temperature
 
-        # Tools (with cache_control on last item for prompt caching)
+        # Tools (with cache_control on last item for prompt caching, 1h TTL)
         if tools:
             tools_copy = [dict(t) for t in tools]
             if tools_copy:
-                tools_copy[-1]["cache_control"] = {"type": "ephemeral"}
+                tools_copy[-1]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
             kwargs["tools"] = tools_copy
-            if force_tool_call and not enable_thinking:
-                kwargs["tool_choice"] = {"type": "any"}
-            else:
-                kwargs["tool_choice"] = {"type": "auto"}
+            kwargs["tool_choice"] = {"type": "auto"}
 
         stream_start_time = time.time()
 
@@ -270,7 +265,13 @@ class AnthropicClient(BaseLLMClient):
             "temperature": temperature,
         }
         if system_prompt:
-            kwargs["system"] = system_prompt
+            kwargs["system"] = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                }
+            ]
 
         response = await self._client.messages.create(**kwargs)
         return "".join(

@@ -14,7 +14,6 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional, TYPE_CHECKING
-from backend.core.filters import strip_xml_tags
 from backend.core.logging import get_logger, request_tracker as rt
 from backend.core.services import (
     ContextService,
@@ -32,7 +31,7 @@ from backend.core.services.react_service import (
 from backend.core.services.emotion_service import classify_emotion
 from backend.core.intent.classifier import classify_keyword
 from backend.llm.router import DEFAULT_MODEL
-from backend.config import CHAT_THINKING_LEVEL
+from backend.config import CHAT_PROVIDER, CHAT_THINKING_LEVEL
 
 if TYPE_CHECKING:
     from backend.api.deps import ChatStateProtocol
@@ -48,7 +47,7 @@ class ChatRequest:
     """Request object for chat processing."""
 
     user_input: str
-    model_choice: str = "anthropic"
+    model_choice: str = CHAT_PROVIDER
     tier: str = "axel"
     enable_audio: bool = False
     enable_search: bool = False
@@ -57,7 +56,7 @@ class ChatRequest:
     multimodal_images: List[Dict] = field(default_factory=list)
     temperature: float = 0.7
     max_tokens: int = 16384
-    enable_thinking: bool = False
+    enable_thinking: bool = True
 
 
 @dataclass
@@ -255,9 +254,6 @@ class ChatHandler:
             thinking_level=CHAT_THINKING_LEVEL,
         )
 
-        # Special case: force tool call for specific keywords
-        force_tool_call = "라자냐" in request.user_input
-
         # 7. Run ReAct loop
         full_response = ""
         llm_elapsed = 0.0
@@ -269,7 +265,6 @@ class ChatHandler:
             available_tools=available_tools,
             config=react_config,
             images=request.multimodal_images if request.multimodal_images else None,
-            force_tool_call=force_tool_call,
             background_tasks=getattr(self.state, "background_tasks", None)
         ):
             # Capture result from control event
@@ -279,9 +274,6 @@ class ChatHandler:
                 llm_elapsed = result.llm_elapsed_ms
             else:
                 yield event
-
-        # 8. Safety net: strip any leaked XML tags (react_service handles most filtering)
-        full_response = strip_xml_tags(full_response)
 
         # Add assistant message to memory and spawn persistence task
         if full_response:

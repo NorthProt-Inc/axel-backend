@@ -1,5 +1,6 @@
 """ChromaDB repository for memory storage."""
 
+import json
 import uuid
 from typing import Dict, List, Optional, Any
 
@@ -9,6 +10,21 @@ from backend.core.logging import get_logger
 from backend.config import CHROMADB_PATH
 
 _log = get_logger("memory.repository")
+
+_ALLOWED_TYPES = (bool, int, float, str)
+
+
+def _sanitize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove None values and convert non-primitive types for ChromaDB compatibility."""
+    sanitized: Dict[str, Any] = {}
+    for k, v in metadata.items():
+        if v is None:
+            continue
+        if isinstance(v, _ALLOWED_TYPES):
+            sanitized[k] = v
+        else:
+            sanitized[k] = json.dumps(v, ensure_ascii=False)
+    return sanitized
 
 
 class ChromaDBRepository:
@@ -71,7 +87,7 @@ class ChromaDBRepository:
             self._collection.add(
                 documents=[content],
                 embeddings=[embedding],  # type: ignore[arg-type]
-                metadatas=[metadata],
+                metadatas=[_sanitize_metadata(metadata)],
                 ids=[doc_id],
             )
             _log.debug("Memory added", id=doc_id[:8])
@@ -214,7 +230,7 @@ class ChromaDBRepository:
         try:
             self._collection.update(
                 ids=[doc_id],
-                metadatas=[metadata],
+                metadatas=[_sanitize_metadata(metadata)],
             )
             return True
 
@@ -238,7 +254,7 @@ class ChromaDBRepository:
         try:
             self._collection.update(
                 ids=doc_ids,
-                metadatas=metadatas,  # type: ignore[arg-type]
+                metadatas=[_sanitize_metadata(m) for m in metadatas],  # type: ignore[arg-type]
             )
             _log.debug("Batch metadata update", count=len(doc_ids))
             return len(doc_ids)

@@ -10,20 +10,25 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 APP_VERSION = os.getenv("AXNMIHN_VERSION", "1.0")
 
-DEFAULT_GEMINI_MODEL = os.getenv("DEFAULT_GEMINI_MODEL", "gemini-3-flash-preview")
-DEFAULT_THINKING_LEVEL = "high"
+# ─── Chat Provider ──────────────────────────────────────────────────────
+# "google" | "anthropic" — 이 한 줄로 기본 채팅 모델 전환
+CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "google")
 
-# Chat response model (separate from utility tasks)
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3-flash-preview")
+# ─── Provider Models ────────────────────────────────────────────────────
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+ANTHROPIC_THINKING_BUDGET = int(os.getenv("ANTHROPIC_THINKING_BUDGET", "10000"))
+
+# ─── Derived ────────────────────────────────────────────────────────────
+CHAT_MODEL = GEMINI_MODEL if CHAT_PROVIDER == "google" else ANTHROPIC_MODEL
 CHAT_THINKING_LEVEL = "high"
 
-MODEL_NAME = CHAT_MODEL
+# ─── Utility Model (summary, importance — always Gemini for cost) ─────
+UTILITY_MODEL = os.getenv("UTILITY_MODEL", GEMINI_MODEL)
+
+# ─── Embedding ──────────────────────────────────────────────────────────
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
 EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "3072"))
-
-# Anthropic Chat Model (primary chat provider)
-ANTHROPIC_CHAT_MODEL = os.getenv("ANTHROPIC_CHAT_MODEL", "claude-sonnet-4-5-20250929")
-ANTHROPIC_THINKING_BUDGET = int(os.getenv("ANTHROPIC_THINKING_BUDGET", "10000"))
 
 SEARCH_PROVIDER = os.getenv("SEARCH_PROVIDER", "tavily")
 
@@ -226,7 +231,6 @@ MEMORY_MIN_IMPORTANCE = _get_float_env("MEMORY_MIN_IMPORTANCE", 0.55)
 
 # Message archival settings
 MESSAGE_ARCHIVE_AFTER_DAYS = _get_int_env("MESSAGE_ARCHIVE_AFTER_DAYS", 7)
-MESSAGE_SUMMARY_MODEL = DEFAULT_GEMINI_MODEL
 
 # =============================================================================
 # Research & Web Scraping

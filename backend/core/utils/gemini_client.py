@@ -43,9 +43,9 @@ def get_gemini_client() -> genai.Client:
 
 def get_model_name() -> str:
     """Get the default Gemini model name from config."""
-    from backend.config import DEFAULT_GEMINI_MODEL
+    from backend.config import GEMINI_MODEL
 
-    return DEFAULT_GEMINI_MODEL
+    return GEMINI_MODEL
 
 
 async def gemini_generate(
@@ -59,7 +59,7 @@ async def gemini_generate(
 
     Args:
         contents: Prompt string or list of Content objects
-        model: Model name override (default: DEFAULT_GEMINI_MODEL)
+        model: Model name override (default: GEMINI_MODEL)
         config: GenerateContentConfig for temperature, thinking, tools, etc.
         timeout_seconds: Per-call timeout in seconds
 

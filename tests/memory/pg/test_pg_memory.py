@@ -311,7 +311,7 @@ class TestRowToMetadata:
         meta = PgMemoryRepository._row_to_metadata({})
         assert meta["type"] == "insight"
         assert meta["importance"] == 0.5
-        assert meta["source_session"] == ""
+        assert meta["source_session"] is None
         assert meta["source_channel"] == ""
         assert meta["access_count"] == 1
         assert meta["decayed_importance"] is None

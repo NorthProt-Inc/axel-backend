@@ -8,7 +8,7 @@ import base64
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from backend.config import MODEL_NAME, STREAM_MAX_RETRIES
+from backend.config import GEMINI_MODEL, STREAM_MAX_RETRIES
 from backend.core.logging import get_logger
 from backend.core.logging.error_monitor import error_monitor
 from backend.core.utils.retry import RetryConfig, classify_error, retry_async_generator
@@ -34,9 +34,9 @@ class GeminiClient(BaseLLMClient):
         """Initialize Gemini client.
 
         Args:
-            model: Model name (defaults to MODEL_NAME from config)
+            model: Model name (defaults to GEMINI_MODEL from config)
         """
-        model = model or MODEL_NAME
+        model = model or GEMINI_MODEL
         _log.debug("gemini client init start", model=model)
         from backend.core.utils.gemini_client import get_gemini_client
         from google.genai import types
@@ -101,7 +101,6 @@ class GeminiClient(BaseLLMClient):
         enable_thinking: bool = False,
         thinking_level: str = "high",
         tools: Optional[List[Dict]] = None,
-        force_tool_call: bool = False,
     ) -> AsyncGenerator[tuple, None]:
         """Generate a streaming response from Gemini.
 
@@ -114,7 +113,6 @@ class GeminiClient(BaseLLMClient):
             enable_thinking: Whether to enable thinking mode
             thinking_level: Level of thinking
             tools: Optional tool definitions
-            force_tool_call: Whether to force tool call
 
         Yields:
             Tuples of (text_chunk, is_thought, function_call)
@@ -187,18 +185,15 @@ class GeminiClient(BaseLLMClient):
             except Exception as e:
                 _log.warning("tools setup failed", err=str(e))
 
-        # Build config
+        # Build config (force_tool_call always False now)
         config = self._build_config(
             temperature, max_tokens, enable_thinking, thinking_level,
-            gemini_tools, force_tool_call,
+            gemini_tools, False,
         )
 
         GEMINI_STREAM_RETRY_CONFIG = RetryConfig(
             max_retries=STREAM_MAX_RETRIES, base_delay=2.0, max_delay=60.0, jitter=0.3,
         )
-
-        if force_tool_call and gemini_tools:
-            _log.info("force tool call enabled", tools=len(tools) if tools else 0)
 
         stream_start_time = time.time()
         _log.debug("stream call start",
@@ -208,11 +203,12 @@ class GeminiClient(BaseLLMClient):
                    max_retries=GEMINI_STREAM_RETRY_CONFIG.max_retries)
 
         async def _create_stream() -> AsyncGenerator[tuple, None]:
-            async for chunk in self._client.aio.models.generate_content_stream(  # type: ignore[attr-defined]
+            stream = await self._client.aio.models.generate_content_stream(  # type: ignore[attr-defined]
                 model=self.model_name,
                 contents=contents,  # type: ignore[arg-type]
                 config=config,
-            ):
+            )
+            async for chunk in stream:
                 is_thought = False
                 text_chunk = ""
                 function_calls: list[dict[str, Any]] = []

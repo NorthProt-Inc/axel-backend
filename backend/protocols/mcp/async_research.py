@@ -80,12 +80,12 @@ async def _analyze_findings(
     try:
         from backend.core.utils.gemini_client import gemini_generate
         from google.genai import types
-        from backend.config import DEFAULT_THINKING_LEVEL
+        from backend.config import CHAT_THINKING_LEVEL
 
         config = types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(
                 include_thoughts=True,
-                thinking_level=DEFAULT_THINKING_LEVEL,  # type: ignore[arg-type]
+                thinking_level=CHAT_THINKING_LEVEL,  # type: ignore[arg-type]
             ),
         )
         response = await gemini_generate(

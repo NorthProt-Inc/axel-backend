@@ -1,0 +1,28 @@
+name: Axel Assistant
+version: 1.0.0
+
+models:
+  - name: Axel
+    provider: openai
+    model: axel
+    apiBase: http://192.168.1.112:8000/v1
+    apiKey: sk-axel-local
+
+tabAutocompleteModel:
+  provider: openai
+  model: axel
+  apiBase: http://192.168.1.112:8000/v1
+  apiKey: sk-axel-local
+
+mcpServers:
+  - name: axel-mcp
+    type: sse
+    url: http://192.168.1.112:8555/sse
+
+  - name: context7
+    type: streamable-http
+    url: http://192.168.1.112:3002/mcp
+
+  - name: markitdown
+    type: streamable-http
+    url: http://192.168.1.112:3001/mcp

@@ -9,7 +9,6 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, AsyncGenerator, Dict, Any, List, Optional
-
 from backend.config import REACT_DEFAULT_MAX_TOKENS, REACT_DEFAULT_TEMPERATURE, REACT_MAX_LOOPS
 from backend.core.errors import AxnmihnError, ProviderError, TransientError
 from backend.core.filters import strip_xml_tags, has_partial_tool_tag
@@ -55,7 +54,7 @@ class ReActConfig:
     max_loops: int = REACT_MAX_LOOPS
     temperature: float = REACT_DEFAULT_TEMPERATURE
     max_tokens: int = REACT_DEFAULT_MAX_TOKENS
-    enable_thinking: bool = False
+    enable_thinking: bool = True
     thinking_level: str = "high"
 
 
@@ -89,7 +88,6 @@ class ReActLoopService:
         available_tools: List[Any],
         config: ReActConfig,
         images: Optional[List[Dict]] = None,
-        force_tool_call: bool = False,
         background_tasks: Optional[List] = None
     ) -> AsyncGenerator[ChatEvent, None]:
         """
@@ -102,7 +100,6 @@ class ReActLoopService:
             available_tools: List of available tools
             config: ReAct configuration
             images: Optional images for multimodal
-            force_tool_call: Force tool call on first iteration
             background_tasks: List to track background tasks
 
         Yields:
@@ -140,8 +137,7 @@ class ReActLoopService:
                         images=images,
                         enable_thinking=config.enable_thinking,
                         thinking_level=config.thinking_level,
-                        tools=available_tools,
-                        force_tool_call=force_tool_call
+                        tools=available_tools
                     ):
                         if function_call:
                             # Flush buffered text before tool call
@@ -240,6 +236,9 @@ class ReActLoopService:
                     yield ChatEvent(EventType.TEXT, fallback)
                     break
 
+            # Emit THINKING_END after each LLM stream completes
+            yield ChatEvent(EventType.THINKING_END, "")
+
             # If no tools pending, we're done
             if not pending_function_calls:
                 break
@@ -271,12 +270,11 @@ class ReActLoopService:
                     )
 
                 # Build next prompt by accumulating tool results
-                if execution_result.observation:
+                if execution_result.observation and execution_result.observation.strip():
                     current_prompt += (
                         f"\n\n[도구 실행 결과]:\n{execution_result.observation}\n\n"
-                        f"이전에 이미 전달한 내용은 반복하지 말고, 위 결과만 바탕으로 이어서 자연스럽게 보고해."
+                        f"위 도구 실행 결과를 바탕으로 사용자에게 자연스럽게 보고하라."
                     )
-                    force_tool_call = False
                     _log.debug("REACT loop", iteration=loop_count)
                 else:
                     break
@@ -297,10 +295,6 @@ class ReActLoopService:
                 yield event
 
         llm_elapsed = (time.perf_counter() - llm_start_time) * 1000
-
-        yield ChatEvent(EventType.THINKING_END, "", metadata={
-            "loops_completed": loop_count
-        })
 
         # Store final response in metadata
         yield ChatEvent(EventType.CONTROL, "", metadata={
@@ -353,18 +347,18 @@ class ReActLoopService:
 
         except Exception as e:
             _log.error("Final response generation failed", error=str(e))
-            fallback = "도구 실행은 완료했는데, 최종 정리하다가 문제가 생겼어. 위 결과를 참고해줘!"
+            fallback = "Final response generation failed"
             yield ChatEvent(EventType.TEXT, fallback)
 
     def _get_fallback_response(self, error_str: str) -> str:
         """Get appropriate fallback response based on error type."""
         if '503' in error_str or 'overloaded' in error_str:
-            return "지금 서버가 좀 바빠. 잠시 후에 다시 물어봐줄래?"
+            return "503"
         elif 'timeout' in error_str:
-            return "응답이 좀 늦어지고 있어. 조금만 기다려주거나 다시 시도해봐!"
+            return "timeout"
         elif 'circuit breaker' in error_str:
-            return "잠시 쉬어가는 중이야. 30초 정도 후에 다시 해볼래?"
+            return "circuit breaker"
         elif '429' in error_str or 'rate' in error_str:
-            return "요청이 좀 많았나봐. 잠깐 쉬었다가 다시 해보자!"
+            return "429"
         else:
-            return "뭔가 문제가 생겼어. 다시 시도해볼래?"
+            return "404 error hidden"

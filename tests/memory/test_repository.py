@@ -120,3 +120,61 @@ class TestChromaDBRepository:
         result = repo.count()
 
         assert result == 42
+
+    def test_add_strips_none_metadata_values(self, mock_chromadb_client, sample_embedding):
+        """add() should strip None values from metadata before passing to ChromaDB."""
+        repo = ChromaDBRepository(client=mock_chromadb_client)
+
+        repo.add(
+            content="Test",
+            embedding=sample_embedding,
+            metadata={"type": "fact", "source_session": None, "importance": 0.5},
+        )
+
+        call_args = mock_chromadb_client.get_or_create_collection().add.call_args
+        passed_metadata = call_args.kwargs["metadatas"][0]
+        assert "source_session" not in passed_metadata
+        assert passed_metadata["type"] == "fact"
+        assert passed_metadata["importance"] == 0.5
+
+    def test_add_converts_non_primitive_metadata(self, mock_chromadb_client, sample_embedding):
+        """add() should convert list/dict metadata values to str."""
+        repo = ChromaDBRepository(client=mock_chromadb_client)
+
+        repo.add(
+            content="Test",
+            embedding=sample_embedding,
+            metadata={"type": "fact", "tags": ["a", "b"], "extra": {"k": "v"}},
+        )
+
+        call_args = mock_chromadb_client.get_or_create_collection().add.call_args
+        passed_metadata = call_args.kwargs["metadatas"][0]
+        assert isinstance(passed_metadata["tags"], str)
+        assert isinstance(passed_metadata["extra"], str)
+
+    def test_update_metadata_strips_none(self, mock_chromadb_client, mock_chromadb_collection):
+        """update_metadata() should strip None values."""
+        mock_chromadb_client.get_or_create_collection.return_value = mock_chromadb_collection
+        repo = ChromaDBRepository(client=mock_chromadb_client)
+
+        repo.update_metadata("mem-001", {"importance": 0.9, "removed_field": None})
+
+        call_args = mock_chromadb_collection.update.call_args
+        passed_metadata = call_args.kwargs["metadatas"][0]
+        assert "removed_field" not in passed_metadata
+        assert passed_metadata["importance"] == 0.9
+
+    def test_batch_update_metadata_strips_none(self, mock_chromadb_client, mock_chromadb_collection):
+        """batch_update_metadata() should strip None values from all metadatas."""
+        mock_chromadb_client.get_or_create_collection.return_value = mock_chromadb_collection
+        repo = ChromaDBRepository(client=mock_chromadb_client)
+
+        repo.batch_update_metadata(
+            ["id1", "id2"],
+            [{"a": 1, "b": None}, {"c": "x", "d": None}],
+        )
+
+        call_args = mock_chromadb_collection.update.call_args
+        passed_metadatas = call_args.kwargs["metadatas"]
+        assert "b" not in passed_metadatas[0]
+        assert "d" not in passed_metadatas[1]

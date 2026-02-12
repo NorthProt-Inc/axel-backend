@@ -282,7 +282,7 @@ class LongTermMemory:
             "importance": importance,
             "repetitions": repetitions,
             "promotion_reason": reason,
-            "source_session": source_session or None,
+            "source_session": source_session,
             "content_hash": content_key,
             "created_at": now,
             "event_timestamp": event_timestamp or now,

@@ -11,7 +11,7 @@ from backend.core.logging import get_logger
 from backend.core.chat_handler import ChatHandler, ChatRequest as HandlerRequest, EventType
 from backend.api.deps import get_state
 from backend.api.deps import require_api_key
-from backend.config import MAX_ATTACHMENT_BYTES
+from backend.config import CHAT_PROVIDER, MAX_ATTACHMENT_BYTES
 
 _log = get_logger("api.openai")
 
@@ -69,7 +69,7 @@ async def openai_chat_completions(request_body: OpenAIChatRequest):
     selected_model = request_body.model.lower() if request_body.model else "axel-auto"
     tier = MODEL_TIER_MAP.get(selected_model, "auto")
 
-    model_choice = "anthropic"
+    model_choice = CHAT_PROVIDER
 
     _log.info(
         "OpenAI API req",
@@ -238,15 +238,9 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
         return f"data: {json.dumps(data)}\n\n"
 
     def _flush_thinking() -> str:
-        duration = int(time.time() - thinking_start_time)
         thinking_content = "".join(thinking_buffer)
-        details_block = (
-            f'<details type="reasoning" done="true" duration="{duration}">\n'
-            f"<summary>Thinking</summary>\n"
-            f"{html.escape(thinking_content)}\n"
-            f"</details>\n\n"
-        )
-        return _make_chunk(details_block)
+        think_block = f"<think>\n{thinking_content}\n</think>\n\n"
+        return _make_chunk(think_block)
 
     try:
         async for event in handler.process(request):
@@ -258,7 +252,8 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
                 yield _make_chunk(event.content)
 
             elif event.type == EventType.THINKING:
-                thinking_buffer.append(event.content)
+                # Skip thinking events - don't emit to frontend
+                pass
 
             elif event.type == EventType.THINKING_START:
                 is_thinking = True
@@ -266,9 +261,8 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
                 thinking_buffer.clear()
 
             elif event.type == EventType.THINKING_END:
-                if thinking_buffer:
-                    yield _flush_thinking()
-                    thinking_buffer.clear()
+                # Clear buffer but don't emit
+                thinking_buffer.clear()
                 is_thinking = False
 
             elif event.type == EventType.TOOL_START:
@@ -277,16 +271,32 @@ async def _stream_openai_response(handler: ChatHandler, request: HandlerRequest)
             elif event.type == EventType.TOOL_END:
                 tool_name = event.metadata.get("tool_name", pending_tool_name or "unknown")
                 success = event.metadata.get("success", True)
+                result_preview = event.metadata.get("result_preview", "")
+                error = event.metadata.get("error", None)
+
                 status = "Done" if success else "Failed"
+
+                # Build content section with result or error
+                content = ""
+                if error:
+                    content = f"\n\n```\nError: {html.escape(str(error))}\n```\n\n"
+                elif result_preview and result_preview.strip():
+                    content = f"\n\n```\n{html.escape(result_preview)}\n```\n\n"
+
                 details_block = (
                     f'\n\n<details type="tool_calls" done="true" name="{html.escape(tool_name)}">\n'
-                    f"<summary>{status}</summary>\n"
+                    f"<summary>{status}</summary>"
+                    f"{content}"
                     f"</details>\n\n"
                 )
                 yield _make_chunk(details_block)
                 pending_tool_name = None
 
             elif event.type == EventType.DONE:
+                # Safety flush: ensure any remaining thinking content is sent before DONE
+                if thinking_buffer:
+                    yield _flush_thinking()
+                    thinking_buffer.clear()
 
                 final_data = {
                     "id": chat_id,

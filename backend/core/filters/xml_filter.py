@@ -130,7 +130,7 @@ def strip_xml_tags(text: str) -> str:
     # Collapse multiple spaces (from tag removal) into one
     cleaned = re.sub(r' {2,}', ' ', cleaned)
 
-    return cleaned.strip('\n')
+    return cleaned
 
 
 def has_partial_tool_tag(text: str) -> bool:

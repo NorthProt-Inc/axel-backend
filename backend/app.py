@@ -18,7 +18,7 @@ from backend.config import (
     SHUTDOWN_TASK_TIMEOUT,
     get_cors_origins,
     APP_VERSION,
-    DEFAULT_GEMINI_MODEL,
+    GEMINI_MODEL,
     ensure_data_directories,
     DATABASE_URL,
     PG_POOL_MIN,
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
         gem_client = get_gemini_client()
         mm = MemoryManager(
             client=gem_client,
-            model_name=DEFAULT_GEMINI_MODEL,
+            model_name=GEMINI_MODEL,
             pg_conn_mgr=pg_conn_mgr,
         )
         ltm = mm.long_term

@@ -25,7 +25,6 @@ class BaseLLMClient(ABC):
         enable_thinking: bool = False,
         thinking_level: str = "high",
         tools: Optional[List[dict]] = None,
-        force_tool_call: bool = False,
     ) -> AsyncGenerator[tuple, None]:
         """Generate a streaming response.
 
@@ -38,7 +37,6 @@ class BaseLLMClient(ABC):
             enable_thinking: Whether to enable chain-of-thought reasoning
             thinking_level: Level of thinking ("low", "medium", "high")
             tools: Optional list of tool definitions
-            force_tool_call: Whether to force a tool call
 
         Yields:
             Tuples of (text_chunk: str, is_thought: bool, function_call: dict | None)

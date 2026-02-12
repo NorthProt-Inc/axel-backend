@@ -24,6 +24,15 @@ class PgMemoryRepository:
 
     # ── Write ────────────────────────────────────────────────────────
 
+    def _ensure_session_exists(self, session_id: str, timestamp: str) -> None:
+        """Create session row if it doesn't exist (avoids FK violation on memories)."""
+        self._conn.execute(
+            """INSERT INTO sessions (session_id, user_id, started_at)
+               VALUES (%s, %s, %s)
+               ON CONFLICT (session_id) DO NOTHING""",
+            (session_id, "Mark", timestamp),
+        )
+
     def add(
         self,
         content: str,
@@ -38,6 +47,10 @@ class PgMemoryRepository:
         if importance is None:
             importance = 0.5
             _log.warning("importance missing, using default", doc_id=doc_id[:8])
+
+        source_session = metadata.get("source_session")
+        if source_session:
+            self._ensure_session_exists(source_session, metadata.get("created_at", now))
 
         sql = """
             INSERT INTO memories
@@ -270,7 +283,7 @@ class PgMemoryRepository:
         return {
             "type": r.get("memory_type", "insight"),
             "importance": float(r.get("importance", 0.5)),
-            "source_session": r.get("source_session", ""),
+            "source_session": r.get("source_session"),
             "source_channel": r.get("source_channel", ""),
             "created_at": str(r.get("created_at", "")),
             "last_accessed": str(r.get("last_accessed", "")),

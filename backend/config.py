@@ -11,7 +11,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 APP_VERSION = os.getenv("AXNMIHN_VERSION", "1.0")
 
 # ─── Chat Provider ──────────────────────────────────────────────────────
-# "google" | "anthropic" — 이 한 줄로 기본 채팅 모델 전환
+# "google" | "anthropic" — LLM Model Changing Toggle
 CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "google")
 
 # ─── Provider Models ────────────────────────────────────────────────────

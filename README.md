@@ -16,7 +16,7 @@ A modern FastAPI-based AI backend service featuring a 6-layer memory system, MCP
 ## Key Features
 
 - **6-Layer Memory System** — M0(Event Buffer) → M1(Working Memory) → M3(Session Archive) → M4(Long-Term) → M5.1-5.3(MemGPT/GraphRAG/MetaMemory)
-- **Multi-LLM Support** — Gemini 3 Flash, Claude Sonnet 4.5, Circuit Breaker & Fallback
+- **Multi-LLM Support** — Gemini, Claude, Circuit Breaker & Fallback
 - **MCP Ecosystem** — Memory, File, System, Research, Home Assistant integration
 - **SIMD Optimization** — C++17 native module (memory decay, vector ops, graph traversal)
 - **Voice Pipeline** — Deepgram Nova-3 (STT) + Qwen3-TTS / OpenAI TTS

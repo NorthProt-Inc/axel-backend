@@ -56,7 +56,7 @@ graph TB
             Emotion["EmotionService"]
         end
 
-        subgraph LLM[""]
+        subgraph LLM[" "]
             Claude["Anthropic<br/>Claude Sonnet 4.5<br/>"]
             Gemini["Google<br/>Gemini 3 Flash<br/>"]
         end

@@ -415,34 +415,33 @@ cd backend/native && pip install .
 ### Environment Variables (`.env`)
 
 ```bash
-# LLM Providers
-GEMINI_API_KEY=
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=                     # TTS fallback
-TAVILY_API_KEY=                     # Search
-DEEPGRAM_API_KEY=                   # STT
+# API Keys
+GEMINI_API_KEY=your-gemini-api-key
+ANTHROPIC_API_KEY=your-anthropic-api-key
+OPENAI_API_KEY=your-openai-api-key
+TAVILY_API_KEY=your-tavily-api-key
+DEEPGRAM_API_KEY=your-deepgram-api-key
+
+# Home Assistant
+HASS_URL=http://homeassistant.local:8123
+HASS_TOKEN=your-hass-long-lived-token
+
+# Server
+AXNMIHN_API_KEY=your-api-key
+HOST=0.0.0.0
+PORT=8000
+DEBUG=false
+TZ=America/Vancouver
 
 # Models
-DEFAULT_GEMINI_MODEL=gemini-3-flash-preview
-CHAT_MODEL=gemini-3-flash-preview
-ANTHROPIC_CHAT_MODEL=claude-sonnet-4-5-20250929
+CHAT_PROVIDER=google
+GEMINI_MODEL=gemini-3-flash-preview
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
 ANTHROPIC_THINKING_BUDGET=10000
 EMBEDDING_MODEL=models/gemini-embedding-001
 EMBEDDING_DIMENSION=3072
 
-# Server
-HOST=0.0.0.0
-PORT=8000
-DEBUG=false
-AXNMIHN_API_KEY=                    # API authentication
-TZ=America/Vancouver
-
-# PostgreSQL (optional - set to enable PG mode)
-DATABASE_URL=postgresql://user:pass@localhost:5432/db
-PG_POOL_MIN=2
-PG_POOL_MAX=10
-
-# Memory Budgets (chars)
+# Memory budgets (chars)
 BUDGET_SYSTEM_PROMPT=20000
 BUDGET_TEMPORAL=5000
 BUDGET_WORKING_MEMORY=80000
@@ -450,7 +449,7 @@ BUDGET_LONG_TERM=30000
 BUDGET_GRAPHRAG=12000
 BUDGET_SESSION_ARCHIVE=8000
 
-# Memory Decay
+# Memory decay
 MEMORY_BASE_DECAY_RATE=0.001
 MEMORY_MIN_RETENTION=0.3
 MEMORY_DECAY_DELETE_THRESHOLD=0.03
@@ -462,27 +461,33 @@ CONTEXT_WORKING_TURNS=20
 CONTEXT_FULL_TURNS=6
 CONTEXT_MAX_CHARS=500000
 
-# TTS
+# Providers
+DEFAULT_LLM_PROVIDER=gemini
+SEARCH_PROVIDER=tavily
+
+# PostgreSQL
+DATABASE_URL=postgresql://axel:password@localhost:5432/axel
+PG_POOL_MIN=2
+PG_POOL_MAX=10
+
+# Docker Compose (docker-compose.yml에서 사용, 선택)
+# POSTGRES_USER=axel
+# POSTGRES_PASSWORD=change-me-in-production
+# POSTGRES_DB=axel
+
+# TTS Configuration
 TTS_SERVICE_URL=http://127.0.0.1:8002
 TTS_SYNTHESIS_TIMEOUT=30.0
 TTS_FFMPEG_TIMEOUT=10.0
 TTS_QUEUE_MAX_PENDING=3
 TTS_IDLE_TIMEOUT=300
 
-# Providers
-DEFAULT_LLM_PROVIDER=gemini
-SEARCH_PROVIDER=tavily
-
-# Channel Adapters (optional — auto-start when token is set)
+# Channel Adapters (Discord / Telegram)
 DISCORD_BOT_TOKEN=
-DISCORD_ALLOWED_CHANNELS=
+DISCORD_ALLOWED_CHANNELS=           # comma-separated channel IDs (optional)
 TELEGRAM_BOT_TOKEN=
-TELEGRAM_ALLOWED_USERS=
-TELEGRAM_ALLOWED_CHATS=
-
-# Home Assistant
-HASS_URL=http://homeassistant.local:8123
-HASS_TOKEN=
+TELEGRAM_ALLOWED_USERS=             # comma-separated usernames (optional)
+TELEGRAM_ALLOWED_CHATS=             # comma-separated chat IDs (optional)
 
 # Admin
 AXNMIHN_ADMIN_EMAIL=admin@example.com
@@ -1129,34 +1134,33 @@ cd backend/native && pip install .
 ### 환경 변수 (`.env`)
 
 ```bash
-# LLM 프로바이더
-GEMINI_API_KEY=
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=                     # TTS 폴백
-TAVILY_API_KEY=                     # 검색
-DEEPGRAM_API_KEY=                   # STT
+# API Keys
+GEMINI_API_KEY=your-gemini-api-key
+ANTHROPIC_API_KEY=your-anthropic-api-key
+OPENAI_API_KEY=your-openai-api-key
+TAVILY_API_KEY=your-tavily-api-key
+DEEPGRAM_API_KEY=your-deepgram-api-key
 
-# 모델
-DEFAULT_GEMINI_MODEL=gemini-3-flash-preview
-CHAT_MODEL=gemini-3-flash-preview
-ANTHROPIC_CHAT_MODEL=claude-sonnet-4-5-20250929
+# Home Assistant
+HASS_URL=http://homeassistant.local:8123
+HASS_TOKEN=your-hass-long-lived-token
+
+# Server
+AXNMIHN_API_KEY=your-api-key
+HOST=0.0.0.0
+PORT=8000
+DEBUG=false
+TZ=America/Vancouver
+
+# Models
+CHAT_PROVIDER=google
+GEMINI_MODEL=gemini-3-flash-preview
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
 ANTHROPIC_THINKING_BUDGET=10000
 EMBEDDING_MODEL=models/gemini-embedding-001
 EMBEDDING_DIMENSION=3072
 
-# 서버
-HOST=0.0.0.0
-PORT=8000
-DEBUG=false
-AXNMIHN_API_KEY=                    # API 인증
-TZ=America/Vancouver
-
-# PostgreSQL (선택 - PG 모드 활성화)
-DATABASE_URL=postgresql://user:pass@localhost:5432/db
-PG_POOL_MIN=2
-PG_POOL_MAX=10
-
-# 메모리 예산 (문자)
+# Memory budgets (chars)
 BUDGET_SYSTEM_PROMPT=20000
 BUDGET_TEMPORAL=5000
 BUDGET_WORKING_MEMORY=80000
@@ -1164,41 +1168,47 @@ BUDGET_LONG_TERM=30000
 BUDGET_GRAPHRAG=12000
 BUDGET_SESSION_ARCHIVE=8000
 
-# 메모리 Decay
+# Memory decay
 MEMORY_BASE_DECAY_RATE=0.001
 MEMORY_MIN_RETENTION=0.3
 MEMORY_DECAY_DELETE_THRESHOLD=0.03
 MEMORY_SIMILARITY_THRESHOLD=0.90
 MEMORY_MIN_IMPORTANCE=0.55
 
-# 컨텍스트
+# Context
 CONTEXT_WORKING_TURNS=20
 CONTEXT_FULL_TURNS=6
 CONTEXT_MAX_CHARS=500000
 
-# TTS
+# Providers
+DEFAULT_LLM_PROVIDER=gemini
+SEARCH_PROVIDER=tavily
+
+# PostgreSQL
+DATABASE_URL=postgresql://axel:password@localhost:5432/axel
+PG_POOL_MIN=2
+PG_POOL_MAX=10
+
+# Docker Compose (docker-compose.yml에서 사용, 선택)
+# POSTGRES_USER=axel
+# POSTGRES_PASSWORD=change-me-in-production
+# POSTGRES_DB=axel
+
+# TTS Configuration
 TTS_SERVICE_URL=http://127.0.0.1:8002
 TTS_SYNTHESIS_TIMEOUT=30.0
 TTS_FFMPEG_TIMEOUT=10.0
 TTS_QUEUE_MAX_PENDING=3
 TTS_IDLE_TIMEOUT=300
 
-# 프로바이더
-DEFAULT_LLM_PROVIDER=gemini
-SEARCH_PROVIDER=tavily
-
-# 채널 어댑터 (선택 — 토큰 설정 시 자동 시작)
+# Channel Adapters (Discord / Telegram)
 DISCORD_BOT_TOKEN=
-DISCORD_ALLOWED_CHANNELS=
+DISCORD_ALLOWED_CHANNELS=           # comma-separated channel IDs (optional)
 TELEGRAM_BOT_TOKEN=
-TELEGRAM_ALLOWED_USERS=
-TELEGRAM_ALLOWED_CHATS=
+TELEGRAM_ALLOWED_USERS=             # comma-separated usernames (optional)
+TELEGRAM_ALLOWED_CHATS=             # comma-separated chat IDs (optional)
 
-# Home Assistant
-HASS_URL=http://homeassistant.local:8123
-HASS_TOKEN=
-
-# 관리자
+# Admin
 AXNMIHN_ADMIN_EMAIL=admin@example.com
 ```
 
